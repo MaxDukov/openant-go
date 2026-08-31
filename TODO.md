@@ -34,12 +34,23 @@ initial Go port. Issue numbers reference Tigge/openant.
 
 ## Robustness (from bug reports)
 
+- [x] **#81/#14 channel cleanup** — DONE: `RemoveChannel` now waits for
+      EVENT_CHANNEL_CLOSED (bounded 1 s) before unassigning; verified on
+      hardware (no more CHANNEL_IN_WRONG_STATE on shutdown).
+- [x] USB "device or resource busy" on rapid re-open — DONE: interface
+      claim retries 5×200 ms. Note: contention with other processes
+      sharing the stick (e.g. a monitoring daemon) can still exceed this
+      window; document single-owner usage.
 - [ ] **#51/#122 USB pipe errors** — automatic device re-open/reconnect on
       `usb read/write` failures (LIBUSB_PIPE / IO errors) in the reader
       loop, with backoff.
 - [ ] **#42/#103 USB timeouts on Raspberry Pi / kernel driver warnings** —
       configurable read timeout, clearer log messages when the kernel
       driver cannot be detached (needs udev rules hint).
+- [ ] EVENT_TX not reported by ANTUSB2 firmware BLJ06.01.01 in master mode
+      (verified: openant 1.3.4 receives none either). Investigate
+      CONFIG_EVENT_BUFFERING / LIB_CONFIG (0x6E) enabling of TX event
+      reporting for master channels; broadcast data itself transmits fine.
 - [ ] **#6/#111 Missed readings / filter improvements** — event buffer
       growth policy; optionally drop-wait strategies for slow consumers.
 - [ ] **#39 set_time on Garmin vívofit** — investigate TAI offset handling
@@ -54,13 +65,8 @@ initial Go port. Issue numbers reference Tigge/openant.
       device id usage; verify period/transmission type quirks.
 - [ ] **#40 serial port permission errors** — friendlier error message
       pointing to the udev rules on Linux.
-- [ ] USB re-open flakiness after abrupt process termination (SIGKILL of a
-      running scan left libusb unable to re-claim the interface briefly) —
-      add a short retry/backoff in `usbDriver.Open`.
 - [ ] **#68 nil data** — audit every parser for short/malformed pages
       (fuzz test goal: no panics, all `error` returns).
-- [ ] **#14/#81 channel cleanup** — CloseChannel ordering (close → wait
-      EVENT_CHANNEL_CLOSED → unassign) to avoid CHANNEL_IN_WRONG_STATE.
 - [ ] **#21 UploadDataCommand truncated args** — verify UploadData parsing
       against a wider set of devices.
 

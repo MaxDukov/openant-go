@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/maxdukov/openant-go/ant"
 )
@@ -258,6 +259,12 @@ func (n *Node) RemoveChannel(ch *Channel) {
 	if err := ch.Close(); err != nil {
 		n.log.Warn("close channel", "channel", ch.ID, "error", err)
 	}
+	// Wait for the channel closed event before unassigning: unassigning
+	// while the stick still processes the close yields CHANNEL_IN_WRONG_STATE
+	// (openant issue #81). Bounded to one second.
+	_, _ = n.events.waitForAttempts(func(ev ant.Event) bool {
+		return ev.Kind == ant.KindChannel && ev.Channel == ch.ID && ev.Code == ant.EventChannelClosed
+	}, 4, 250*time.Millisecond)
 	if err := ch.Unassign(); err != nil {
 		n.log.Warn("unassign channel", "channel", ch.ID, "error", err)
 	}

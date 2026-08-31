@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"runtime"
 	"sync"
 	"time"
@@ -141,12 +142,23 @@ func (u *usbDriver) Open() error {
 		ctx.Close()
 		return fmt.Errorf("usb: set configuration: %w", err)
 	}
-	intf, err := cfg.Interface(0, 0)
-	if err != nil {
-		cfg.Close()
-		dev.Close()
-		ctx.Close()
-		return fmt.Errorf("usb: claim interface: %w", err)
+	// Claiming the interface can fail transiently with "device or resource
+	// busy" right after another process (or our own probe) released it;
+	// retry briefly before giving up.
+	var intf *gousb.Interface
+	for attempt := 0; ; attempt++ {
+		intf, err = cfg.Interface(0, 0)
+		if err == nil {
+			break
+		}
+		if attempt >= 4 {
+			cfg.Close()
+			dev.Close()
+			ctx.Close()
+			return fmt.Errorf("usb: claim interface: %w", err)
+		}
+		slog.Default().Debug("usb: claim interface busy, retrying", "attempt", attempt+1, "error", err)
+		time.Sleep(200 * time.Millisecond)
 	}
 	in, out, err := openEndpoint(intf)
 	if err != nil {

@@ -52,8 +52,16 @@ func (s *SimDriver) respond(m *ant.Message) {
 			return
 		}
 		s.queueRequested(ant.MessageID(m.Data[1]))
+	case ant.IDCloseChannel:
+		// A real stick sends the command response followed by the
+		// EVENT_CHANNEL_CLOSED channel event.
+		if len(m.Data) < 1 {
+			return
+		}
+		s.okResponse(m.Data[0], m.ID)
+		s.EmitAckEvent(m.Data[0], ant.EventChannelClosed)
 	case ant.IDAssignChannel, ant.IDUnassignChannel, ant.IDOpenChannel,
-		ant.IDCloseChannel, ant.IDChannelPeriod, ant.IDChannelSearchTimeout,
+		ant.IDChannelPeriod, ant.IDChannelSearchTimeout,
 		ant.IDChannelRFFrequency, ant.IDSetNetworkKey, ant.IDSetTransmitPower,
 		ant.IDSetSearchWaveform, ant.IDOpenRxScanMode,
 		ant.IDEnableExtendedMessages, ant.IDEnableLED, ant.IDSetChannelID:

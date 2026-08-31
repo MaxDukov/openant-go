@@ -46,7 +46,12 @@ type matcher func(ev ant.Event) bool
 // TransferFailedException from the same side condition). It returns
 // ErrWaitTimeout after ~10 seconds without a match.
 func (b *eventBuffer) waitFor(match matcher) (ant.Event, error) {
-	for attempt := 0; attempt < waitAttempts; attempt++ {
+	return b.waitForAttempts(match, waitAttempts, b.interval)
+}
+
+// waitForAttempts is waitFor with custom attempts and wait interval.
+func (b *eventBuffer) waitForAttempts(match matcher, attempts int, interval time.Duration) (ant.Event, error) {
+	for attempt := 0; attempt < attempts; attempt++ {
 		b.mu.Lock()
 		for i, ev := range b.events {
 			if match(ev) {
@@ -66,7 +71,7 @@ func (b *eventBuffer) waitFor(match matcher) (ant.Event, error) {
 
 		select {
 		case <-ch:
-		case <-time.After(b.interval):
+		case <-time.After(interval):
 		}
 	}
 	return ant.Event{}, ErrWaitTimeout
