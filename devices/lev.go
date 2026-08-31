@@ -20,8 +20,15 @@ const (
 	LevManufacturerSpecific LevErrorMessage = 16
 )
 
-// LevErrorMessageFromByte maps unknown values like openant's _missing_.
+// LevErrorMessageFromByte maps raw values: 0-4 are defined errors, 5-15
+// are reserved (Unknown), 16+ manufacturer specific. openant's Enum
+// _missing_ only fires for non-members, so the naive `b < 16` check of the
+// initial port wrongly returned Unknown for the defined errors (code
+// review PR #1, P1-13).
 func LevErrorMessageFromByte(b byte) LevErrorMessage {
+	if b <= 4 {
+		return LevErrorMessage(b)
+	}
 	if b < 16 {
 		return LevUnknown
 	}

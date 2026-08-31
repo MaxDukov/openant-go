@@ -152,17 +152,20 @@ func NewApplication(node *easy.Node, opts ...AppOption) (*Application, error) {
 	ch.OnBroadcastData = app.onData
 	ch.OnBurstData = app.onData
 
+	// Start the run loop before the user hook so Stop (which joins it via
+	// runDone) cannot deadlock when SetupChannel fails (code review PR #1,
+	// P1-10).
+	go func() {
+		node.Run(context.Background())
+		close(app.runDone)
+	}()
+
 	if app.SetupChannel != nil {
 		if err := app.SetupChannel(ch); err != nil {
 			app.Stop()
 			return nil, fmt.Errorf("fs: setup channel: %w", err)
 		}
 	}
-
-	go func() {
-		node.Run(context.Background())
-		close(app.runDone)
-	}()
 	return app, nil
 }
 

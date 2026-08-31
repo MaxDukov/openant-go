@@ -138,8 +138,10 @@ func (s *Shifting) onBatteryData(b BatteryData) {
 
 func functionSetEvent(b byte) FunctionSetEvent {
 	return FunctionSetEvent{
-		FunctionSetID:        int(b & 0x0F),
-		FunctionSetEventType: FunctionSetEventType((b & 0x03) >> 4),
+		FunctionSetID: int(b & 0x0F),
+		// Event type occupies bits 4-5 (openant used mask 0x03, which
+		// always yields 0 after the shift; code review PR #1, P1-12).
+		FunctionSetEventType: FunctionSetEventType((b & 0x30) >> 4),
 	}
 }
 

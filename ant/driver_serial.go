@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"go.bug.st/serial"
@@ -26,6 +27,10 @@ const SerialBaud = 115200
 // stick (0fcf:1004) exposed as /dev/ttyUSB* or /dev/cu.*.
 type SerialDriver struct {
 	path string
+
+	// mu guards port: Close (from Stop) runs concurrently with the reader
+	// goroutine's Read (code review PR #1, P1-8).
+	mu   sync.Mutex
 	port serial.Port
 }
 
@@ -92,6 +97,8 @@ func init() {
 // Open opens the serial port at 115200 baud with a short read deadline.
 // It is idempotent: the driver registry opens devices during probing.
 func (s *SerialDriver) Open() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.port != nil {
 		return nil // already open
 	}
@@ -114,21 +121,26 @@ func (s *SerialDriver) Open() error {
 
 // Close closes the serial port.
 func (s *SerialDriver) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.port == nil {
 		return nil
 	}
-	err := s.port.Close()
+	p := s.port
 	s.port = nil
-	return err
+	return p.Close()
 }
 
 // Read reads bytes from the port. It returns ErrTimeout when the read
 // deadline elapses without data, mirroring pyserial timeout behaviour.
 func (s *SerialDriver) Read(p []byte) (int, error) {
-	if s.port == nil {
+	s.mu.Lock()
+	port := s.port
+	s.mu.Unlock()
+	if port == nil {
 		return 0, ErrDriverClosed
 	}
-	n, err := s.port.Read(p)
+	n, err := port.Read(p)
 	if err != nil {
 		if errors.Is(err, os.ErrDeadlineExceeded) {
 			return 0, ErrTimeout
@@ -143,8 +155,11 @@ func (s *SerialDriver) Read(p []byte) (int, error) {
 
 // Write writes bytes to the port.
 func (s *SerialDriver) Write(p []byte) (int, error) {
-	if s.port == nil {
+	s.mu.Lock()
+	port := s.port
+	s.mu.Unlock()
+	if port == nil {
 		return 0, ErrDriverClosed
 	}
-	return s.port.Write(p)
+	return port.Write(p)
 }

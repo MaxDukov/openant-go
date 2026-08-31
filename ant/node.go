@@ -133,18 +133,27 @@ func (c *Core) reader() {
 	defer c.wg.Done()
 	buf := make([]byte, 0, readBufferSize*2)
 	chunk := make([]byte, readBufferSize)
+	var errDelay time.Duration // backoff on consecutive driver errors
 	for c.running.Load() {
 		n, err := c.driver.Read(chunk)
 		if err != nil {
-			if !c.running.Load() || err == ErrTimeout {
-				continue // timeout is the normal poll tick
-			}
 			if !c.running.Load() {
 				return
 			}
-			c.log.Debug("driver read", "error", err)
+			if err == ErrTimeout {
+				continue // timeout is the normal poll tick
+			}
+			// Persistent driver failures (stick unplugged, USB errors)
+			// must not busy-spin the loop (code review PR #1, P1-9):
+			// back off exponentially up to one second.
+			c.log.Debug("driver read", "error", err, "backoff", errDelay)
+			if errDelay < time.Second {
+				errDelay = errDelay*2 + 10*time.Millisecond
+			}
+			time.Sleep(errDelay)
 			continue
 		}
+		errDelay = 0
 		buf = append(buf, chunk[:n]...)
 		buf = c.consume(buf)
 	}

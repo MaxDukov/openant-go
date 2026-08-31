@@ -282,9 +282,11 @@ func (f *FitnessEquipment) onData(data []byte) {
 
 		delta := (f.torqueUpdateEventCount[1] + 256 - f.torqueUpdateEventCount[0]) % 256
 		deltaTorque := (f.accumulatedTorque[1] + 65536 - f.accumulatedTorque[0]) % 65536
-		deltaWheelPeriod := f.wheelPeriod[1] + 65536 - f.wheelPeriod[0]%65536
+		// Modular delta over uint16; see power_meter.go for the operator
+		// precedence note (code review PR #1, P1-11).
+		deltaWheelPeriod := (f.wheelPeriod[1] + 65536 - f.wheelPeriod[0]) % 65536
 
-		f.Data.State = FitnessEquipmentState(data[7] & 0x70 >> 4)
+		f.Data.State = FitnessEquipmentState((data[7] & 0x70) >> 4)
 
 		if delta != 0 {
 			f.Power.Torque = math.Round(float64(deltaTorque)/(32*float64(delta))*100) / 100
@@ -301,7 +303,7 @@ func (f *FitnessEquipment) onData(data []byte) {
 		f.Data.Type = FitnessEquipmentType(data[1])
 		f.Data.Capabilities = int(data[2] & 0x0F)
 		f.Data.Speed = math.Round(float64(int(data[4])+int(data[5])<<8)/1000*1000) / 1000
-		f.Data.State = FitnessEquipmentState(data[7] & 0x70 >> 4)
+		f.Data.State = FitnessEquipmentState((data[7] & 0x70) >> 4)
 		f.log.Info("general FE", "device", f.String(), "type", int(f.Data.Type), "state", int(f.Data.State))
 		f.fireDeviceData(int(data[0]), "general_fe", f.Data)
 

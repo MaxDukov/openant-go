@@ -103,7 +103,7 @@ func (d *DropperSeatpost) onData(data []byte) {
 		} else {
 			d.Data.ConfiguredUnlockDelay = float64(delay) * 0.01
 		}
-		d.Data.DelayIndicator = DelayIndicator(data[6] & 0x80 >> 7)
+		d.Data.DelayIndicator = DelayIndicator((data[6] & 0x80) >> 7)
 		d.Data.ValveState = ValveState((data[7] & 0x80) >> 7)
 
 		if delta := (d.eventCount[1] + 256 - d.eventCount[0]) % 256; delta != 0 {

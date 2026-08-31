@@ -97,7 +97,11 @@ func (p *PowerMeter) onData(data []byte) {
 
 		deltaUpdateCount := (p.torqueUpdateEventCount[1] + 256 - p.torqueUpdateEventCount[0]) % 256
 		deltaTorque := (p.accumulatedTorque[1] + 65536 - p.accumulatedTorque[0]) % 65536
-		deltaCrankPeriod := p.crankPeriod[1] + 65536 - p.crankPeriod[0]%65536
+		// Modular delta over uint16. openant (and the initial port) wrote
+		// `curr + 65536 - prev % 65536` where % binds tighter than -, which
+		// inflates the delta by 65536 whenever curr >= prev and zeroes the
+		// computed power (code review PR #1, P1-11).
+		deltaCrankPeriod := (p.crankPeriod[1] + 65536 - p.crankPeriod[0]) % 65536
 
 		if deltaUpdateCount != 0 {
 			p.Data.Torque = float64(deltaTorque) / (32 * float64(deltaUpdateCount))
