@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -153,24 +154,10 @@ func (n *Node) Run(ctx context.Context) {
 			if ch == nil {
 				continue
 			}
-			switch de.code {
-			case ant.EventRxBroadcast:
-				if ch.OnBroadcastData != nil {
-					ch.OnBroadcastData(de.data)
-				}
-			case ant.EventRxAcknowledged:
-				if ch.OnAcknowledgedData != nil {
-					ch.OnAcknowledgedData(de.data)
-				}
-			case ant.EventTx:
-				if ch.OnBroadcastTxData != nil {
-					ch.OnBroadcastTxData(de.data)
-				}
-			case ant.EventRxBurstPacket:
-				if ch.OnBurstData != nil {
-					ch.OnBurstData(de.data)
-				}
-			}
+			// A panic in a user callback must not kill the dispatch
+			// loop (and the process); log and continue (code review
+			// PR #1, P0-6 — second line of defence after parser fixes).
+			n.dispatch(ch, de)
 		}
 	}
 }
@@ -376,6 +363,36 @@ func (n *Node) WaitForSpecial(msgID ant.MessageID) error {
 		return ev.Kind == ant.KindResponse && ev.Code == ant.Code(msgID)
 	})
 	return err
+}
+
+// dispatch invokes the channel data callback for one data event,
+// recovering panics from user code.
+func (n *Node) dispatch(ch *Channel, de dataEvent) {
+	defer func() {
+		if r := recover(); r != nil {
+			n.log.Error("panic in channel callback recovered",
+				"channel", de.channel, "panic", r,
+				"stack", string(debug.Stack()))
+		}
+	}()
+	switch de.code {
+	case ant.EventRxBroadcast:
+		if ch.OnBroadcastData != nil {
+			ch.OnBroadcastData(de.data)
+		}
+	case ant.EventRxAcknowledged:
+		if ch.OnAcknowledgedData != nil {
+			ch.OnAcknowledgedData(de.data)
+		}
+	case ant.EventTx:
+		if ch.OnBroadcastTxData != nil {
+			ch.OnBroadcastTxData(de.data)
+		}
+	case ant.EventRxBurstPacket:
+		if ch.OnBurstData != nil {
+			ch.OnBurstData(de.data)
+		}
+	}
 }
 
 // Stop shuts the node and the underlying core down and closes the driver.

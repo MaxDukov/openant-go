@@ -173,9 +173,12 @@ func (a *Application) Channel() *easy.Channel { return a.channel }
 func (a *Application) Node() *easy.Node { return a.node }
 
 // onData classifies incoming data into beacons and commands, mirroring
-// openant's _on_data.
+// openant's _on_data. The payload length is controlled by the RF peer,
+// so every branch must be bounds-checked (code review PR #1, P0-1).
 func (a *Application) onData(data []byte) {
-	if len(data) == 0 {
+	if len(data) < 8 {
+		// Beacons are 8 bytes; shorter payloads cannot carry one. A bare
+		// command is longer still, so drop anything short.
 		return
 	}
 	switch data[0] {
@@ -370,8 +373,14 @@ func (a *Application) Disconnect() {
 	}
 }
 
+// MaxTransferBytes caps the total download size accepted from a device,
+// protecting against crafted responses allocating unbounded memory
+// (code review PR #1, P0-4).
+const MaxTransferBytes = 64 << 20 // 64 MiB
+
 // Download downloads a file by index, reporting progress via callback
-// (may be nil). It retries on command timeouts, like openant.
+// (may be nil). It retries on command timeouts, like openant. All response
+// fields are device-controlled and validated before use.
 func (a *Application) Download(index uint16, callback ProgressFn) ([]byte, error) {
 	var (
 		offset uint32
@@ -398,28 +407,41 @@ func (a *Application) Download(index uint16, callback ProgressFn) ([]byte, error
 		if dr.Response != DownloadOK {
 			return nil, &ProtocolError{Op: "download", Code: dr.Response, Msg: "request refused"}
 		}
-		remaining := dr.Remaining
-		total := dr.Offset + remaining
+		// Validate device-controlled offsets in 64 bit arithmetic so a
+		// crafted response cannot overflow or force a huge allocation.
+		total := uint64(dr.Offset) + uint64(dr.Remaining)
+		if dr.Offset != offset {
+			return nil, &ProtocolError{Op: "download", Code: dr.Response,
+				Msg: fmt.Sprintf("unexpected offset %d (want %d)", dr.Offset, offset)}
+		}
+		if total > uint64(dr.Size) {
+			return nil, &ProtocolError{Op: "download", Code: dr.Response,
+				Msg: fmt.Sprintf("offset+remaining %d exceeds size %d", total, dr.Size)}
+		}
+		if total > MaxTransferBytes {
+			return nil, &ProtocolError{Op: "download", Code: dr.Response,
+				Msg: fmt.Sprintf("size %d exceeds limit %d", total, MaxTransferBytes)}
+		}
 		// Grow the buffer to `total` and copy the received block in place.
-		if uint32(len(data)) < total {
+		if uint64(len(data)) < total {
 			grown := make([]byte, total)
 			copy(grown, data)
 			data = grown
 		}
 		block := dr.Data
-		if uint32(len(block)) > remaining {
-			block = block[:remaining]
+		if uint64(len(block)) > uint64(dr.Remaining) {
+			block = block[:dr.Remaining]
 		}
 		copy(data[dr.Offset:total], block)
 
 		if callback != nil && dr.Size != 0 {
 			callback(float64(total) / float64(dr.Size))
 		}
-		if total == dr.Size {
+		if total == uint64(dr.Size) {
 			return data, nil
 		}
 		crc = dr.CRC
-		offset = total
+		offset = uint32(total)
 	}
 }
 
@@ -432,7 +454,8 @@ func (a *Application) DownloadDirectory(callback ProgressFn) (*Directory, error)
 	return ParseDirectory(data)
 }
 
-// Upload uploads data to the file with the given index.
+// Upload uploads data to the file with the given index. Response fields
+// are device-controlled and validated before use (code review PR #1, P0-5).
 func (a *Application) Upload(index uint16, data []byte, callback ProgressFn) error {
 	iteration := 0
 	for {
@@ -457,10 +480,17 @@ func (a *Application) Upload(index uint16, data []byte, callback ProgressFn) err
 		}
 
 		offset := ur.LastDataOffset
-		maxBlock := ur.MaximumBlockSize
-		end := offset + maxBlock
-		if end > uint32(len(data)) {
-			end = uint32(len(data))
+		maxBlock := uint64(ur.MaximumBlockSize)
+		if uint64(offset) > uint64(len(data)) {
+			return &ProtocolError{Op: "upload", Code: ur.Response,
+				Msg: fmt.Sprintf("device offset %d beyond data length %d", offset, len(data))}
+		}
+		if maxBlock == 0 {
+			return &ProtocolError{Op: "upload", Code: ur.Response, Msg: "device returned zero block size"}
+		}
+		end := uint64(offset) + maxBlock
+		if end > uint64(len(data)) {
+			end = uint64(len(data))
 		}
 		packet := append([]byte(nil), data[offset:end]...)
 		crcSeed := ur.CRCSeed
@@ -483,9 +513,9 @@ func (a *Application) Upload(index uint16, data []byte, callback ProgressFn) err
 		}
 
 		if callback != nil && len(data) != 0 {
-			callback(float64(offset+uint32(len(packet))) / float64(len(data)))
+			callback((float64(offset) + float64(len(packet))) / float64(len(data)))
 		}
-		if offset+uint32(len(packet)) >= uint32(len(data)) {
+		if uint64(offset)+uint64(len(packet)) >= uint64(len(data)) {
 			return nil
 		}
 		iteration++

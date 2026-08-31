@@ -372,8 +372,9 @@ func (d *baseDevice) onData(data []byte) {
 	}
 
 	// Extended (> 8 bytes) messages carry the device number and id beyond
-	// the page.
-	if len(data) > 8 && !d.attached {
+	// the page: 8 page bytes + flag byte + 2 id + type + trans = 13 bytes
+	// minimum (code review PR #1, P0-2).
+	if len(data) >= 13 && !d.attached {
 		deviceID := int(data[9]) + int(data[10])<<8
 		deviceType := int(data[11])
 		transType := int(data[12])
@@ -410,62 +411,66 @@ func (d *baseDevice) onData(data []byte) {
 		}
 	}
 
-	// Common pages.
-	switch data[0] {
-	case 80: // manufacturer info
-		d.Common.HardwareRev = int(data[3])
-		d.Common.ManufacturerID = int(data[4]) + int(data[5])<<8
-		d.Common.ModelNo = int(data[6]) + int(data[7])<<8
-		d.log.Info("manufacturer info", "device", d.String(),
-			"hw_rev", d.Common.HardwareRev, "id", d.Common.ManufacturerID,
-			"model", d.Common.ModelNo)
-	case 81: // product info
-		swRev := data[2]
-		swMain := data[3]
-		if swRev == 0xFF {
-			d.Common.SoftwareVer = fmt.Sprintf("%v", float64(swMain)/10)
-		} else {
-			d.Common.SoftwareVer = fmt.Sprintf("%v", float64(swMain*100+swRev)/1000)
-		}
-		d.Common.SerialNo = uint32(data[4]) | uint32(data[5])<<8 | uint32(data[6])<<16 | uint32(data[7])<<24
-		d.log.Info("product info", "device", d.String(),
-			"software", d.Common.SoftwareVer, "serial", d.Common.SerialNo)
-	case 82: // battery status
-		d.Common.LastBattery.VoltageFractional = float64(data[6]) / 256
-		d.Common.LastBattery.VoltageCoarse = int(data[7] & 0x0F)
-		d.Common.LastBattery.Status = BatteryStatus((data[7] & 0x70) >> 4)
-		d.Common.LastBattery.BatteryID = int((data[2] & 0xF0) >> 4)
-
-		opTime := int(data[3]) + int(data[4])<<8
-		if data[7]&0x80 == 0x80 {
-			d.Common.LastBattery.OperatingTime = opTime * 2
-		} else {
-			d.Common.LastBattery.OperatingTime = opTime * 16
-		}
-
-		if data[2] != 0xFF {
-			// Multi-battery system: store per battery id.
-			d.Common.BatteryNumber = int(data[2] & 0x0F)
-			d.Common.LastBatteryID = int((data[2] & 0xF0) >> 4)
-			if d.Common.LastBatteryID < len(d.Batteries) {
-				d.Batteries[d.Common.LastBatteryID] = d.Common.LastBattery
+	// Common pages read bytes up to data[7]; require a full page
+	// (code review PR #1, P0-2). Short payloads still reach the profile
+	// hooks below, which perform their own length checks.
+	if len(data) >= 8 {
+		switch data[0] {
+		case 80: // manufacturer info
+			d.Common.HardwareRev = int(data[3])
+			d.Common.ManufacturerID = int(data[4]) + int(data[5])<<8
+			d.Common.ModelNo = int(data[6]) + int(data[7])<<8
+			d.log.Info("manufacturer info", "device", d.String(),
+				"hw_rev", d.Common.HardwareRev, "id", d.Common.ManufacturerID,
+				"model", d.Common.ModelNo)
+		case 81: // product info
+			swRev := data[2]
+			swMain := data[3]
+			if swRev == 0xFF {
+				d.Common.SoftwareVer = fmt.Sprintf("%v", float64(swMain)/10)
+			} else {
+				d.Common.SoftwareVer = fmt.Sprintf("%v", float64(swMain*100+swRev)/1000)
 			}
-		} else {
-			d.Common.BatteryNumber = 1
-			d.Common.LastBatteryID = 0xFF
-		}
-		d.onBattery(d.Common.LastBattery)
-	case 83: // date and time
-		second := int(data[2])
-		minute := int(data[3])
-		hour := int(data[4])
-		day := int(data[5] & 0x1F)
-		month := int(data[6])
-		year := int(data[7]) + 2000
-		if td := tryDateTime(year, month, day, hour, minute, second); td != nil {
-			d.Common.TimeDate = td
-		} else {
-			d.log.Warn("invalid date and time", "device", d.DeviceID, "raw", strings.TrimSpace(fmt.Sprintf("% X", data)))
+			d.Common.SerialNo = uint32(data[4]) | uint32(data[5])<<8 | uint32(data[6])<<16 | uint32(data[7])<<24
+			d.log.Info("product info", "device", d.String(),
+				"software", d.Common.SoftwareVer, "serial", d.Common.SerialNo)
+		case 82: // battery status
+			d.Common.LastBattery.VoltageFractional = float64(data[6]) / 256
+			d.Common.LastBattery.VoltageCoarse = int(data[7] & 0x0F)
+			d.Common.LastBattery.Status = BatteryStatus((data[7] & 0x70) >> 4)
+			d.Common.LastBattery.BatteryID = int((data[2] & 0xF0) >> 4)
+
+			opTime := int(data[3]) + int(data[4])<<8
+			if data[7]&0x80 == 0x80 {
+				d.Common.LastBattery.OperatingTime = opTime * 2
+			} else {
+				d.Common.LastBattery.OperatingTime = opTime * 16
+			}
+
+			if data[2] != 0xFF {
+				// Multi-battery system: store per battery id.
+				d.Common.BatteryNumber = int(data[2] & 0x0F)
+				d.Common.LastBatteryID = int((data[2] & 0xF0) >> 4)
+				if d.Common.LastBatteryID < len(d.Batteries) {
+					d.Batteries[d.Common.LastBatteryID] = d.Common.LastBattery
+				}
+			} else {
+				d.Common.BatteryNumber = 1
+				d.Common.LastBatteryID = 0xFF
+			}
+			d.onBattery(d.Common.LastBattery)
+		case 83: // date and time
+			second := int(data[2])
+			minute := int(data[3])
+			hour := int(data[4])
+			day := int(data[5] & 0x1F)
+			month := int(data[6])
+			year := int(data[7]) + 2000
+			if td := tryDateTime(year, month, day, hour, minute, second); td != nil {
+				d.Common.TimeDate = td
+			} else {
+				d.log.Warn("invalid date and time", "device", d.DeviceID, "raw", strings.TrimSpace(fmt.Sprintf("% X", data)))
+			}
 		}
 	}
 

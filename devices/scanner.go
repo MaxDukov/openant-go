@@ -61,7 +61,9 @@ func NewScanner(node *easy.Node, deviceID int, deviceType DeviceType, transType 
 
 // scanData implements the scanning data handler.
 func (s *Scanner) scanData(data []byte) {
-	if len(data) <= 8 {
+	// Extended messages need at least 13 bytes: 8 page bytes, one flag
+	// byte and four id bytes (code review PR #1, P0-3).
+	if len(data) < 13 {
 		return
 	}
 	deviceID := int(data[9]) + int(data[10])<<8
