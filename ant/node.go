@@ -1,6 +1,7 @@
 package ant
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -171,9 +172,9 @@ func (c *Core) consume(buf []byte) []byte {
 		msg, n, err := ParseFrame(buf)
 		if err != nil {
 			switch {
-			case err == ErrShortFrame:
+			case errors.Is(err, ErrShortFrame):
 				return buf
-			case err == ErrBadSync:
+			case errors.Is(err, ErrBadSync):
 				c.log.Debug("resync: bad sync byte")
 				buf = buf[1:]
 				continue

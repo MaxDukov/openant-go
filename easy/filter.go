@@ -91,12 +91,3 @@ func (b *eventBuffer) waitForAttempts(match matcher, attempts int, interval time
 func (b *eventBuffer) removeAt(i int) {
 	b.events = append(b.events[:i], b.events[i+1:]...)
 }
-
-// snapshot returns a copy of the buffered events.
-func (b *eventBuffer) snapshot() []ant.Event {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	out := make([]ant.Event, len(b.events))
-	copy(out, b.events)
-	return out
-}

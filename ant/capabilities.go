@@ -1,5 +1,7 @@
 package ant
 
+import "encoding/binary"
+
 // StandardOptions, AdvancedOptions, AdvancedOptionsTwo and AdvancedOptionsThree
 // are the capability bitsets returned in the CAPABILITIES response (0x54).
 // They mirror the enums in openant.base.driver.
@@ -116,5 +118,5 @@ func SerialNumber(data []byte) uint32 {
 	if len(data) < 4 {
 		return 0
 	}
-	return uint32LE(data[:4])
+	return binary.LittleEndian.Uint32(data[:4])
 }

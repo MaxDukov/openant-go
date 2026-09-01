@@ -8,7 +8,6 @@
 package ant
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 )
@@ -348,7 +347,3 @@ func cloneBytes(b []byte) []byte {
 	copy(out, b)
 	return out
 }
-
-// uint16LE and uint32LE are small helpers used across the package.
-func uint16LE(b []byte) uint16 { return binary.LittleEndian.Uint16(b) }
-func uint32LE(b []byte) uint32 { return binary.LittleEndian.Uint32(b) }

@@ -24,7 +24,7 @@ ANT and ANT-FS library for Go — a port of the Python
 
 ## Requirements
 
-- Go >= 1.22 with cgo enabled and libusb installed (macOS:
+- Go >= 1.25 with cgo enabled and libusb installed (macOS:
   `brew install libusb`, Debian/Ubuntu: `sudo apt install libusb-1.0-0-dev`).
 - An ANT USB stick (optional for tests):
   - ANTUSB2 (0fcf:1008) or ANTUSB-m (0fcf:1009),

@@ -2,11 +2,13 @@
 # python -m openant.udev_rules; install here to
 # /etc/udev/rules.d/42-ant-usb-sticks.rules and run:
 #   sudo udevadm control --reload-rules && sudo udevadm trigger)
+# Group-accessible permissions (0660 + plugdev) instead of world-writable
+# 0666; add your user to the plugdev group.
 
 # ANTUSB2 stick
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0fcf", ATTRS{idProduct}=="1008", MODE="0666", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0fcf", ATTRS{idProduct}=="1008", MODE="0660", GROUP="plugdev"
 # ANTUSB-m stick
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0fcf", ATTRS{idProduct}=="1009", MODE="0666", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0fcf", ATTRS{idProduct}=="1009", MODE="0660", GROUP="plugdev"
 # Serial ANT stick
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0fcf", ATTRS{idProduct}=="1004", MODE="0666", GROUP="plugdev"
-KERNEL=="ttyUSB*", ATTRS{idVendor}=="0fcf", ATTRS{idProduct}=="1004", MODE="0666", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0fcf", ATTRS{idProduct}=="1004", MODE="0660", GROUP="plugdev"
+KERNEL=="ttyUSB*", ATTRS{idVendor}=="0fcf", ATTRS{idProduct}=="1004", MODE="0660", GROUP="plugdev"
