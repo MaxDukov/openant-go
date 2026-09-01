@@ -14,6 +14,10 @@ const (
 	eventQueueSize = 64
 )
 
+// maxBufferedEvents caps the event buffer when nobody consumes it
+// (drop-oldest, code review PR #1, P2-16).
+const maxBufferedEvents = 1024
+
 // eventBuffer is a mutex-protected FIFO of events with broadcast
 // notification for waiters. It replaces openant's deque+Condition pairs.
 type eventBuffer struct {
@@ -27,10 +31,16 @@ func newEventBuffer() *eventBuffer {
 	return &eventBuffer{notify: make(chan struct{}), interval: time.Second}
 }
 
-// push appends an event and wakes all waiters.
+// push appends an event and wakes all waiters. When the buffer is full
+// the oldest event is dropped (a waiting consumer still sees newer
+// responses; an unconsumed backlog never grows unbounded).
 func (b *eventBuffer) push(ev ant.Event) {
 	b.mu.Lock()
 	b.events = append(b.events, ev)
+	if len(b.events) > maxBufferedEvents {
+		excess := len(b.events) - maxBufferedEvents
+		b.events = append(b.events[:0], b.events[excess:]...)
+	}
 	ch := b.notify
 	b.notify = make(chan struct{})
 	b.mu.Unlock()

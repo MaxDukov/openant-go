@@ -40,6 +40,10 @@ const readBufferSize = 4096
 // eventsBuffer is the pipeline depth between the reader and the dispatcher.
 const eventsBuffer = 64
 
+// maxBurstBytes caps a reassembled burst transfer (code review PR #1,
+// P2-16); real ANT-FS transfers stay well below this.
+const maxBurstBytes = 1 << 20 // 1 MiB
+
 // Core is the low-level ANT engine: it reads frames from a Driver,
 // reassembles burst transfers, classifies messages into events, and
 // schedules acknowledged/burst transmission in the channel timeslot. It is
@@ -229,6 +233,14 @@ func (c *Core) dispatch(m *Message) {
 			c.burst = c.burst[:0]
 		}
 		c.burst = append(c.burst, m.Data[1:]...)
+		if len(c.burst) > maxBurstBytes {
+			// A misbehaving peer could stream burst packets without the
+			// last-sequence flag forever; cap the buffer (code review
+			// PR #1, P2-16).
+			c.log.Warn("burst exceeds limit, dropping transfer", "bytes", len(c.burst), "limit", maxBurstBytes)
+			c.burst = c.burst[:0]
+			return
+		}
 		if seq&0b100 != 0 {
 			// Last packet of the burst.
 			c.emit(Event{Kind: KindChannel, Channel: channel, Code: EventRxBurstPacket, Data: cloneBytes(c.burst)})
@@ -301,19 +313,28 @@ func (c *Core) drainTimeslot() {
 	}
 }
 
-// Write sends a message immediately.
+// Write sends a message immediately. Oversized payloads (> 255 bytes)
+// are rejected instead of being silently truncated by the length byte.
 func (c *Core) Write(m *Message) error {
+	if err := m.Validate(); err != nil {
+		return err
+	}
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 	return c.writeLocked(m)
 }
 
 // WriteTimeslot queues a message for transmission in the next channel
-// timeslot (used for acknowledged and burst data).
-func (c *Core) WriteTimeslot(m *Message) {
+// timeslot (used for acknowledged and burst data). Oversized payloads are
+// rejected.
+func (c *Core) WriteTimeslot(m *Message) error {
+	if err := m.Validate(); err != nil {
+		return err
+	}
 	c.txMu.Lock()
 	c.txQueue = append(c.txQueue, m)
 	c.txMu.Unlock()
+	return nil
 }
 
 func (c *Core) write(m *Message) {
@@ -447,14 +468,14 @@ func (c *Core) SendAcknowledgedData(ch byte, data []byte) error {
 	if len(data) != 8 {
 		return fmt.Errorf("ant: acknowledged data must be 8 bytes, got %d", len(data))
 	}
-	c.WriteTimeslot(NewMessage(IDAcknowledgedData, append([]byte{ch}, data...)))
+	_ = c.WriteTimeslot(NewMessage(IDAcknowledgedData, append([]byte{ch}, data...)))
 	return nil
 }
 
 // SendBurstTransferPacket queues a single burst packet; chSeq packs the
 // channel number and sequence bits.
 func (c *Core) SendBurstTransferPacket(chSeq byte, data []byte) {
-	c.WriteTimeslot(NewMessage(IDBurstTransferData, append([]byte{chSeq}, data...)))
+	_ = c.WriteTimeslot(NewMessage(IDBurstTransferData, append([]byte{chSeq}, data...)))
 }
 
 // SendBurstTransfer splits data (multiple of 8 bytes) into burst packets

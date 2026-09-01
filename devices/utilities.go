@@ -35,8 +35,9 @@ type JSONDevice struct {
 	Serial           int    `json:"serial"`
 }
 
-// ReadJSONDevices reads a devices.json produced by the scanner; returns nil
-// when the file does not exist (openant read_json returns False).
+// ReadJSONDevices reads a devices.json produced by the scanner (format
+// {"devices": [...]}, same as openant); returns nil when the file does
+// not exist (openant read_json returns False).
 func ReadJSONDevices(path string) ([]JSONDevice, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -45,9 +46,11 @@ func ReadJSONDevices(path string) ([]JSONDevice, error) {
 		}
 		return nil, err
 	}
-	var devices []JSONDevice
-	if err := json.Unmarshal(b, &devices); err != nil {
+	var data struct {
+		Devices []JSONDevice `json:"devices"`
+	}
+	if err := json.Unmarshal(b, &data); err != nil {
 		return nil, fmt.Errorf("devices: parse %s: %w", path, err)
 	}
-	return devices, nil
+	return data.Devices, nil
 }

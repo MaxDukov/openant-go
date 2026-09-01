@@ -253,7 +253,19 @@ func Checksum(sync, length, id byte, data []byte) byte {
 	return c
 }
 
+// Validate checks that the message can be encoded as a single ANT frame:
+// the one byte length field limits payloads to 255 bytes (code review
+// PR #1, P2-14).
+func (m *Message) Validate() error {
+	if len(m.Data) > 255 {
+		return fmt.Errorf("ant: payload exceeds 255 bytes: %d", len(m.Data))
+	}
+	return nil
+}
+
 // Encode returns the full wire frame: sync, length, id, data, checksum.
+// Payloads longer than 255 bytes cannot be framed; use Validate at the
+// API boundaries to reject them earlier.
 func (m *Message) Encode() []byte {
 	out := make([]byte, 0, len(m.Data)+4)
 	out = append(out, SyncByte, byte(len(m.Data)), byte(m.ID))
