@@ -1,8 +1,59 @@
 # TODO
 
 Backlog for openant-go, derived from the issue tracker of the Python
-[openant](https://github.com/Tigge/openant) library and from gaps in the
-initial Go port. Issue numbers reference Tigge/openant.
+[openant](https://github.com/Tigge/openant) library and from code reviews
+of the Go port. Issue numbers reference Tigge/openant.
+
+## Code review 2026-08-31 (PR #1: REVIEW.MD + REVIEW2.MD)
+
+Working through the review findings (17 confirmed, 3 refuted — details in
+the PR). Fixed items are checked and reference the commit topics.
+
+### P0 — panics/DoS on RF/USB-controlled data
+- [x] Short beacon slice in `fs.Application.onData` (P0-1)
+- [x] `baseDevice.onData`: extended block `len >= 13`, common pages
+      `len >= 8` (P0-2)
+- [x] `Scanner.scanData`: `len >= 13` (P0-3)
+- [x] `Download`: uint64 math, offset/size validation, 64 MiB cap (P0-4)
+- [x] `Upload`: offset/block-size validation, uint64 math (P0-5)
+- [x] `recover()` around user callbacks in `easy.Node.Run` (P0-6)
+- [x] Fuzz tests: `ParseFrame`, `ParseBeacon`, `ParseCommand`,
+      `ParsePipeCommand`, `ParseDirectory`, `Application.onData`,
+      `baseDevice.onData`, `Scanner.scanData` (P0-7) — no crashes found
+      in short runs; extend corpus/CI time
+
+### P1 — concurrency, lifecycle, numeric correctness
+- [x] `SerialDriver` port race — mutex added (P1-8)
+- [x] Reader busy-spin on persistent driver errors — exponential backoff
+      (P1-9; also mitigates openant #51/#122 until full reconnect exists)
+- [x] `NewApplication` deadlock on `SetupChannel` error (P1-10)
+- [x] Modular uint16 delta for crank/wheel period — openant-inherited
+      precedence bug zeroing torque/power (P1-11)
+- [x] `shift` function-set event type mask `0x30` (P1-12)
+- [x] `LevErrorMessageFromByte` inversion (P1-13)
+
+### P2 — protocol API, buffers
+- [x] `Message.Validate` + rejection in `Core.Write`/`WriteTimeslot` (P2-14)
+- [x] `ReadJSONDevices` reads `{"devices":[...]}` like `Scanner.Save`
+      and openant (P2-15)
+- [x] Caps: burst reassembly 1 MiB, event buffer 1024 drop-oldest (P2-16)
+
+### P3 — cosmetics
+- [x] `errors.Is` in `consume()` (dead `ErrBadSync` branch) (P3-17)
+- [x] Dead code removed: `uint16LE`/`uint32LE`, `snapshot` (P3-19)
+- [x] udev `0660` + plugdev instead of `0666` (P3-20)
+- [x] README: Go >= 1.25 (P3-21)
+
+### Refuted findings (do not "fix" again)
+- `data[7] & 0x70 >> 4` / `data[6] & 0x80 >> 7` are **correct in Go**:
+  `&` and `>>` share one precedence level and associate left-to-right,
+  so they evaluate as `(x & 0x70) >> 4`. The reviewer assumed C/Python
+  precedence (the Python original does have this bug; the port escaped
+  it). Parentheses added for readability only.
+- `HeartRate.onData` already guards `len < 8`; `BikeSpeed`/`BikeCadence`
+  go through `onSpeedCadencePages` which guards as well (P3-18).
+- `cmd/goant` exists in the repository (P3-21 partially wrong); only the
+  Go version claim in the README was stale.
 
 ## Features (from open issues)
 
@@ -34,16 +85,18 @@ initial Go port. Issue numbers reference Tigge/openant.
 
 ## Robustness (from bug reports)
 
-- [x] **#81/#14 channel cleanup** — DONE: `RemoveChannel` now waits for
+- [x] **#81/#14 channel cleanup** — DONE: `RemoveChannel` waits for
       EVENT_CHANNEL_CLOSED (bounded 1 s) before unassigning; verified on
       hardware (no more CHANNEL_IN_WRONG_STATE on shutdown).
+- [x] **#68 nil data / malformed pages** — DONE via review P0 guards plus
+      fuzz tests; keep extending corpus.
 - [x] USB "device or resource busy" on rapid re-open — DONE: interface
       claim retries 5×200 ms. Note: contention with other processes
       sharing the stick (e.g. a monitoring daemon) can still exceed this
       window; document single-owner usage.
 - [ ] **#51/#122 USB pipe errors** — automatic device re-open/reconnect on
       `usb read/write` failures (LIBUSB_PIPE / IO errors) in the reader
-      loop, with backoff.
+      loop, with backoff (backoff itself is in; reconnect is not).
 - [ ] **#42/#103 USB timeouts on Raspberry Pi / kernel driver warnings** —
       configurable read timeout, clearer log messages when the kernel
       driver cannot be detached (needs udev rules hint).
@@ -51,37 +104,33 @@ initial Go port. Issue numbers reference Tigge/openant.
       (verified: openant 1.3.4 receives none either). Investigate
       CONFIG_EVENT_BUFFERING / LIB_CONFIG (0x6E) enabling of TX event
       reporting for master channels; broadcast data itself transmits fine.
-- [ ] **#6/#111 Missed readings / filter improvements** — event buffer
-      growth policy; optionally drop-wait strategies for slow consumers.
+- [ ] **#6/#111 Missed readings** — buffer caps landed (burst 1 MiB, event
+      buffer drop-oldest); remaining: instrument drop counters/metrics.
 - [ ] **#39 set_time on Garmin vívofit** — investigate TAI offset handling
       (`fs.SetTime` applies +35 s; may need device quirks).
 - [ ] **#119 Timezone handling** — document/verify that all timestamps are
       UTC; optionally allow local-time rendering in CLI.
 - [ ] **#117 Influx list fields** — pointer/array fields (calculated speed
       etc.) need stable serialisation for the future influx CLI.
-- [ ] **#109 datetime out of bounds** — guarded in `tryDateTime` already;
-      add fuzz tests for all page parsers.
+- [ ] **#109 datetime out of bounds** — guarded in `tryDateTime`; fuzz
+      tests added, keep corpus growing.
 - [ ] **#84/#44 BSC sensors not connecting** — document wildcard vs exact
       device id usage; verify period/transmission type quirks.
 - [ ] **#40 serial port permission errors** — friendlier error message
       pointing to the udev rules on Linux.
-- [ ] **#68 nil data** — audit every parser for short/malformed pages
-      (fuzz test goal: no panics, all `error` returns).
 - [ ] **#21 UploadDataCommand truncated args** — verify UploadData parsing
       against a wider set of devices.
 
 ## Port quality
 
-- [ ] Fix openant bug carried over deliberately: none known; but add
-      regression tests for the ones fixed during the port:
+- [x] openant bugs fixed during the port (regression-tested):
       - `advanced_options_three` read from byte 6 (not 4),
       - `DownloadRequest` field widths kept openant-compatible, document
         spec difference (u32 crc seed / u16 max block),
       - `CreateFile` command pipe parsing (openant crashes on it),
       - `shift` page 0x03 out-of-bounds read,
       - `controls_device` 0x47 reply payload assembly.
-- [ ] Continuous fuzzing (`go-fuzz`/native Fuzz) for `ant.ParseFrame`,
-      `fs.ParseCommand`, `fs.ParsePipeCommand`, `fs.ParseDirectory` and
-      device page decoders.
+- [ ] Continuous fuzzing in CI (longer budgets, corpus caching).
 - [ ] Benchmarks for the reader loop and page decoders.
 - [ ] GitHub Actions CI: vet, test -race, build examples, golangci-lint.
+
