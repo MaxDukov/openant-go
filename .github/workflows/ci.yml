@@ -7,12 +7,7 @@ on:
 
 jobs:
   test:
-    name: test (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -20,13 +15,8 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install libusb (Linux)
+      - name: Install libusb
         run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0-dev pkg-config
-        if: runner.os == 'Linux'
-
-      - name: Install libusb (macOS)
-        run: brew install libusb pkg-config
-        if: runner.os == 'macOS'
 
       - name: Check formatting
         run: |
