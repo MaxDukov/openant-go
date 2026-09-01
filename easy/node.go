@@ -31,6 +31,20 @@ type Node struct {
 	caps        *ant.Capabilities
 	serial      uint32
 	antVersion  string
+	// networks remembers the network keys set via SetNetworkKey so the
+	// stick can be reconfigured after an automatic reconnect.
+	networks map[byte][]byte
+
+	// reopen, when set, enables automatic reconnect: on a fatal driver
+	// error the Node re-opens the device and restores all channel and
+	// network state (openant issues #51/#122). New installs one
+	// automatically; custom drivers use WithReopen.
+	reopen func() (ant.Driver, error)
+
+	// OnReconnect, when set, is invoked after a successful reconnect and
+	// full configuration restore. attempt counts re-open cycles since the
+	// failure; lastErr is the driver error that triggered the reconnect.
+	OnReconnect func(attempt int, lastErr error)
 
 	stopOnce sync.Once
 	stopCh   chan struct{}
@@ -44,8 +58,13 @@ type dataEvent struct {
 }
 
 // New finds an ANT device, opens it and returns a started Node. The node
-// resets the stick, as openant does.
+// resets the stick, as openant does. Automatic reconnect is enabled: if
+// the stick fails or is re-plugged, the node re-opens it and restores all
+// channels and network keys.
 func New(opts ...NodeOption) (*Node, error) {
+	opts = append([]NodeOption{WithReopen(func() (ant.Driver, error) {
+		return ant.NewDriver()
+	})}, opts...)
 	d, err := ant.FindDriver()
 	if err != nil {
 		return nil, fmt.Errorf("easy: find driver: %w", err)
@@ -54,7 +73,9 @@ func New(opts ...NodeOption) (*Node, error) {
 }
 
 // NewWithDriver builds a Node on top of a custom driver (e.g. the anttest
-// mock). The driver is opened by the node and reset is issued.
+// mock). The driver is opened by the node and reset is issued. Automatic
+// reconnect is only enabled when the WithReopen option provides a way to
+// create a fresh driver instance.
 func NewWithDriver(d ant.Driver, opts ...NodeOption) (*Node, error) {
 	n := &Node{
 		log:         slog.Default(),
@@ -63,12 +84,20 @@ func NewWithDriver(d ant.Driver, opts ...NodeOption) (*Node, error) {
 		dataCh:      make(chan dataEvent, eventQueueSize),
 		maxChannels: 8,
 		maxNetworks: 8,
+		networks:    make(map[byte][]byte),
 		stopCh:      make(chan struct{}),
 	}
 	for _, o := range opts {
 		o(n)
 	}
-	core, err := ant.NewCore(d, ant.WithLogger(n.log), ant.WithEventHandler(n.handleEvent))
+	coreOpts := []ant.Option{ant.WithLogger(n.log), ant.WithEventHandler(n.handleEvent)}
+	if n.reopen != nil {
+		coreOpts = append(coreOpts,
+			ant.WithDriverFactory(n.reopen),
+			ant.WithReconnectHook(n.reconnectHook),
+		)
+	}
+	core, err := ant.NewCore(d, coreOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -86,6 +115,68 @@ type NodeOption func(*Node)
 
 // WithNodeLogger sets a custom logger.
 func WithNodeLogger(l *slog.Logger) NodeOption { return func(n *Node) { n.log = l } }
+
+// WithReopen enables automatic reconnect with a custom driver source: on a
+// fatal driver error the node calls f to obtain a fresh (unopened) driver,
+// opens it and restores all channels and network keys. Without reconnect
+// capability (and without easy.New's default), driver failures only back
+// off as before.
+func WithReopen(f func() (ant.Driver, error)) NodeOption {
+	return func(n *Node) { n.reopen = f }
+}
+
+// reconnectHook restores the stick configuration after Core re-opened the
+// device. It runs on the reader goroutine; response waits are served by
+// the still-running dispatcher. A returned error makes Core retry.
+func (n *Node) reconnectHook(attempt int, lastErr error) error {
+	if err := n.restore(); err != nil {
+		n.log.Warn("config restore after reconnect failed", "attempt", attempt, "error", err)
+		return err
+	}
+	n.log.Info("ant device reconnected, configuration restored", "attempt", attempt)
+	if n.OnReconnect != nil {
+		n.OnReconnect(attempt, lastErr)
+	}
+	return nil
+}
+
+// restore replays network keys and channel configuration onto the fresh
+// stick, in dependency order (networks first, then channels by number).
+func (n *Node) restore() error {
+	n.mu.Lock()
+	channels := make([]*Channel, len(n.channels))
+	copy(channels, n.channels)
+	networks := make(map[byte][]byte, len(n.networks))
+	for nw, key := range n.networks {
+		networks[nw] = append([]byte(nil), key...)
+	}
+	n.mu.Unlock()
+
+	// Deterministic order: iterate the fixed-size network space.
+	for nw := byte(0); nw < 255; nw++ {
+		key, ok := networks[nw]
+		if !ok {
+			continue
+		}
+		if err := n.SetNetworkKey(nw, key); err != nil {
+			return fmt.Errorf("easy: restore network %d: %w", nw, err)
+		}
+	}
+	for _, ch := range channels {
+		if ch == nil {
+			continue
+		}
+		if err := ch.restore(); err != nil {
+			return fmt.Errorf("easy: restore channel %d: %w", ch.ID, err)
+		}
+	}
+	// Refresh stick metadata; best effort — responses fill in via the
+	// regular event path.
+	n.Core.RequestMessage(0, ant.IDCapabilities)
+	n.Core.RequestMessage(0, ant.IDSerialNumber)
+	n.Core.RequestMessage(0, ant.IDAntVersion)
+	return nil
+}
 
 // handleEvent is invoked from the core dispatcher goroutine for every
 // classified event. It mirrors openant's _worker_response/_worker_event.
@@ -282,7 +373,15 @@ func (n *Node) SetNetworkKey(network byte, key []byte) error {
 	if err := n.Core.SetNetworkKey(network, key); err != nil {
 		return err
 	}
-	return n.WaitForResponse(ant.IDSetNetworkKey)
+	if err := n.WaitForResponse(ant.IDSetNetworkKey); err != nil {
+		return err
+	}
+	// Remember the key so the stick can be reconfigured after an
+	// automatic reconnect (it forgets everything on power cycle).
+	n.mu.Lock()
+	n.networks[network] = append([]byte(nil), key...)
+	n.mu.Unlock()
+	return nil
 }
 
 // SetLED enables or disables the stick LED.

@@ -97,7 +97,21 @@ func FindDriverForSerial(serial string) (Driver, error) {
 	return findDriver(serial)
 }
 
-func findDriver(serial string) (Driver, error) {
+// NewDriver returns a fresh, not yet opened driver for the first matching
+// device found. Unlike FindDriver the caller is responsible for opening it;
+// Core does so when created with WithDriverFactory.
+func NewDriver() (Driver, error) {
+	return newDriver("")
+}
+
+// NewDriverForSerial is NewDriver restricted to the device with the given
+// serial number (empty matches any device).
+func NewDriverForSerial(serial string) (Driver, error) {
+	return newDriver(serial)
+}
+
+// newDriver probes the registry and returns an unopened driver instance.
+func newDriver(serial string) (Driver, error) {
 	for _, f := range Drivers() {
 		if !f.Probe() {
 			continue
@@ -114,11 +128,18 @@ func findDriver(serial string) (Driver, error) {
 				continue
 			}
 		}
-		d := f.New()
-		if err := d.Open(); err != nil {
-			return nil, fmt.Errorf("ant: open %s driver: %w", f.Name, err)
-		}
-		return d, nil
+		return f.New(), nil
 	}
 	return nil, ErrDriverNotFound
+}
+
+func findDriver(serial string) (Driver, error) {
+	d, err := newDriver(serial)
+	if err != nil {
+		return nil, err
+	}
+	if err := d.Open(); err != nil {
+		return nil, fmt.Errorf("ant: open driver: %w", err)
+	}
+	return d, nil
 }

@@ -18,6 +18,9 @@ type MockDriver struct {
 	closed bool
 	opened bool
 	writes [][]byte
+	// readErr, when set, is returned by Read until cleared (fault
+	// injection for reconnect tests).
+	readErr error
 }
 
 // NewMockDriver returns an unopened mock driver.
@@ -62,6 +65,22 @@ func (m *MockDriver) QueueMessage(msg *ant.Message) {
 	m.QueueRead(msg.Encode())
 }
 
+// FailReads makes every subsequent Read return err (nil restores normal
+// operation). It is used to simulate unplugged sticks and USB errors.
+func (m *MockDriver) FailReads(err error) {
+	m.mu.Lock()
+	m.readErr = err
+	m.mu.Unlock()
+	m.signal() // wake a possibly blocked reader
+}
+
+// Opened reports whether the driver is currently open.
+func (m *MockDriver) Opened() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.opened
+}
+
 // Writes returns a copy of all frames written through the driver so far.
 func (m *MockDriver) Writes() [][]byte {
 	m.mu.Lock()
@@ -72,10 +91,15 @@ func (m *MockDriver) Writes() [][]byte {
 }
 
 // Read returns queued bytes. It blocks until data is available or the
-// driver is closed.
+// driver is closed. A fault injected with FailReads takes precedence.
 func (m *MockDriver) Read(p []byte) (int, error) {
 	for {
 		m.mu.Lock()
+		if m.readErr != nil && !m.closed {
+			err := m.readErr
+			m.mu.Unlock()
+			return 0, err
+		}
 		if len(m.rxBuf) > 0 {
 			n := copy(p, m.rxBuf)
 			m.rxBuf = m.rxBuf[n:]

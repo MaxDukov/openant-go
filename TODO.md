@@ -76,8 +76,10 @@ the PR). Fixed items are checked and reference the commit topics.
       exists; expose it in the CLI (`--serial`) and `easy.New` options.
 - [ ] **#67/#91 Multiple dongles** — support several concurrent nodes in
       CLI tools with one goroutine per stick.
-- [ ] **#59 Documentation** — package docs site, protocol notes, godoc
-      examples.
+- [x] **#59 Documentation** — DONE: package docs (doc.go for ant/easy/
+      devices/fs), godoc examples (easy, devices), docs/PROTOCOL.md with
+      frame format, message flow, ANT-FS summary and firmware quirks. A
+      hosted docs site remains open-ended.
 - [ ] CLI `influx` and `mqtt` subcommands (streaming device data to
       InfluxDB/MQTT, incl. `--topic-per-field`/`--device-topic` behaviour)
       — deferred by design decision.
@@ -94,9 +96,12 @@ the PR). Fixed items are checked and reference the commit topics.
       claim retries 5×200 ms. Note: contention with other processes
       sharing the stick (e.g. a monitoring daemon) can still exceed this
       window; document single-owner usage.
-- [ ] **#51/#122 USB pipe errors** — automatic device re-open/reconnect on
-      `usb read/write` failures (LIBUSB_PIPE / IO errors) in the reader
-      loop, with backoff (backoff itself is in; reconnect is not).
+- [x] **#51/#122 USB pipe errors** — DONE: automatic re-open/reconnect on
+      fatal driver errors in a supervisor goroutine (backoff 500 ms→5 s,
+      indefinite until Stop). The driver is swapped before the reconnect
+      hook so response waits work; easy.Node replays network keys and
+      channel config, then fires OnReconnect. Verified on hardware
+      (sysfs unbind/bind of ANTUSB2 on the Pi: restored on attempt 3).
 - [ ] **#42/#103 USB timeouts on Raspberry Pi / kernel driver warnings** —
       configurable read timeout, clearer log messages when the kernel
       driver cannot be detached (needs udev rules hint).

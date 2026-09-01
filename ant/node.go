@@ -9,6 +9,18 @@ import (
 	"time"
 )
 
+// ReopenFunc creates a fresh driver instance, used to re-open the device
+// after a fatal driver error (USB stick unplugged, LIBUSB pipe/IO errors,
+// serial port disappearing). The returned driver must not be opened yet;
+// Core opens it as part of the reconnect procedure.
+type ReopenFunc func() (Driver, error)
+
+// ReconnectHook is invoked from the reader goroutine after a successful
+// reconnect, before regular operation resumes. Returning an error signals
+// that post-reconnect reconfiguration failed and makes Core retry the
+// whole re-open procedure.
+type ReconnectHook func(attempt int, lastErr error) error
+
 // EventKind distinguishes protocol responses from asynchronous channel
 // events (including the virtual data events).
 type EventKind int
@@ -41,6 +53,23 @@ const readBufferSize = 4096
 // eventsBuffer is the pipeline depth between the reader and the dispatcher.
 const eventsBuffer = 64
 
+// Reconnect timing: first retry after reconnectBaseDelay, doubling up to
+// reconnectMaxDelay, indefinitely until Stop (long-running service
+// semantics; openant issue #51/#122). Tests override the base delay.
+var (
+	reconnectBaseDelay = 500 * time.Millisecond
+	reconnectMaxDelay  = 5 * time.Second
+)
+
+// driverRef boxes a Driver so the active instance can be swapped atomically
+// during a reconnect (the concrete type may change between generations).
+type driverRef struct {
+	d Driver
+}
+
+// maxReconnectAttempts caps reconnect cycles; 0 means retry forever.
+var maxReconnectAttempts = 0
+
 // maxBurstBytes caps a reassembled burst transfer (code review PR #1,
 // P2-16); real ANT-FS transfers stay well below this.
 const maxBurstBytes = 1 << 20 // 1 MiB
@@ -50,10 +79,20 @@ const maxBurstBytes = 1 << 20 // 1 MiB
 // schedules acknowledged/burst transmission in the channel timeslot. It is
 // the Go equivalent of openant.base.ant.Ant.
 type Core struct {
-	driver Driver
+	driver atomic.Pointer[driverRef]
 	log    *slog.Logger
 
 	handler func(Event)
+
+	// reopen, when set, enables automatic reconnect on fatal driver
+	// errors; hook runs after the new driver is opened and reset.
+	reopen ReopenFunc
+	hook   ReconnectHook
+
+	// reconnecting guards a single reconnectLoop; gen increments on
+	// every successful driver swap so the reader can drop stale state.
+	reconnecting atomic.Bool
+	gen          atomic.Uint32
 
 	events chan Event
 
@@ -86,6 +125,23 @@ func WithEventHandler(fn func(Event)) Option {
 	return func(c *Core) { c.handler = fn }
 }
 
+// WithDriverFactory enables automatic device re-connect (openant issues
+// #51/#122): on fatal driver errors Core closes the dead driver, re-creates
+// it via fn, opens it, resets the stick and invokes the WithReconnectHook
+// callback before resuming. Without this option driver errors only back
+// off, as before.
+func WithDriverFactory(fn ReopenFunc) Option {
+	return func(c *Core) { c.reopen = fn }
+}
+
+// WithReconnectHook sets the callback invoked after a successful
+// re-connect (new driver opened, system reset issued). Use it to restore
+// channel configuration: the stick loses all state on power cycle. A
+// returned error makes Core retry the re-open procedure.
+func WithReconnectHook(fn ReconnectHook) Option {
+	return func(c *Core) { c.hook = fn }
+}
+
 // NewCore creates the engine around an opened driver and starts its reader
 // and dispatcher goroutines. As in openant, a system reset is issued on
 // start (with a 1 second wait), so the stick is in a known state.
@@ -94,7 +150,6 @@ func NewCore(d Driver, opts ...Option) (*Core, error) {
 		return nil, fmt.Errorf("ant: nil driver")
 	}
 	c := &Core{
-		driver: d,
 		log:    slog.Default(),
 		events: make(chan Event, eventsBuffer),
 		stopCh: make(chan struct{}),
@@ -105,6 +160,7 @@ func NewCore(d Driver, opts ...Option) (*Core, error) {
 	if err := d.Open(); err != nil {
 		return nil, fmt.Errorf("ant: open driver: %w", err)
 	}
+	c.driver.Store(&driverRef{d: d})
 	c.running.Store(true)
 	c.wg.Add(2)
 	go c.reader()
@@ -127,20 +183,42 @@ func (c *Core) Stop() {
 	}
 	close(c.stopCh)
 	// Closing the driver unblocks a pending Read.
-	if err := c.driver.Close(); err != nil {
-		c.log.Warn("driver close", "error", err)
+	if d := c.currentDriver(); d != nil {
+		if err := d.Close(); err != nil {
+			c.log.Warn("driver close", "error", err)
+		}
 	}
 	c.wg.Wait()
 	c.log.Info("ant core stopped")
+}
+
+// currentDriver returns the active driver (nil only if Core is being torn
+// down between generations).
+func (c *Core) currentDriver() Driver {
+	if r := c.driver.Load(); r != nil {
+		return r.d
+	}
+	return nil
 }
 
 func (c *Core) reader() {
 	defer c.wg.Done()
 	buf := make([]byte, 0, readBufferSize*2)
 	chunk := make([]byte, readBufferSize)
+	myGen := c.gen.Load()
 	var errDelay time.Duration // backoff on consecutive driver errors
 	for c.running.Load() {
-		n, err := c.driver.Read(chunk)
+		d := c.currentDriver()
+		if d == nil {
+			// Torn down between generations; wait for a swap or stop.
+			select {
+			case <-c.stopCh:
+				return
+			case <-time.After(10 * time.Millisecond):
+			}
+			continue
+		}
+		n, err := d.Read(chunk)
 		if err != nil {
 			if !c.running.Load() {
 				return
@@ -148,9 +226,27 @@ func (c *Core) reader() {
 			if err == ErrTimeout {
 				continue // timeout is the normal poll tick
 			}
-			// Persistent driver failures (stick unplugged, USB errors)
-			// must not busy-spin the loop (code review PR #1, P1-9):
-			// back off exponentially up to one second.
+			// Fatal driver failure (stick unplugged, USB pipe/IO error,
+			// serial port gone): with a driver factory configured, hand
+			// over to the reconnect supervisor. It swaps the driver and
+			// restores the stick configuration while this goroutine
+			// keeps serving the new driver so the hook's response waits
+			// can complete.
+			if c.reopen != nil {
+				if c.reconnecting.CompareAndSwap(false, true) {
+					c.wg.Add(1)
+					go c.reconnectLoop(err)
+				}
+				select {
+				case <-c.stopCh:
+					return
+				case <-time.After(10 * time.Millisecond):
+				}
+				continue
+			}
+			// Persistent driver failures must not busy-spin the loop
+			// (code review PR #1, P1-9): back off exponentially up to
+			// one second.
 			c.log.Debug("driver read", "error", err, "backoff", errDelay)
 			if errDelay < time.Second {
 				errDelay = errDelay*2 + 10*time.Millisecond
@@ -159,9 +255,74 @@ func (c *Core) reader() {
 			continue
 		}
 		errDelay = 0
+		// A new generation means a fresh stick: drop any state left
+		// over from the dead one, including a partially read frame.
+		if g := c.gen.Load(); g != myGen {
+			buf = buf[:0]
+			c.burst = c.burst[:0]
+			c.lastData = nil
+			myGen = g
+		}
 		buf = append(buf, chunk[:n]...)
 		buf = c.consume(buf)
 	}
+}
+
+// reconnectLoop closes the dead driver and re-opens a fresh one, retrying
+// with exponential backoff until it succeeds or Core is stopped. It runs
+// in its own goroutine so the reader can continue serving the new driver
+// while the hook restores the configuration. The driver pointer is swapped
+// BEFORE the hook: response waits inside the hook require an active reader.
+func (c *Core) reconnectLoop(cause error) {
+	defer c.wg.Done()
+	defer c.reconnecting.Store(false)
+
+	c.log.Warn("driver failure, reconnecting", "error", cause)
+	if d := c.currentDriver(); d != nil {
+		_ = d.Close() // best effort; the device may already be gone
+	}
+
+	delay := reconnectBaseDelay
+	for attempt := 1; maxReconnectAttempts == 0 || attempt <= maxReconnectAttempts; attempt++ {
+		select {
+		case <-c.stopCh:
+			return
+		case <-time.After(delay):
+		}
+		if !c.running.Load() {
+			return
+		}
+
+		nd, err := c.reopen()
+		if err != nil {
+			c.log.Debug("re-open driver", "attempt", attempt, "error", err)
+		} else if err := nd.Open(); err != nil {
+			c.log.Debug("open driver", "attempt", attempt, "error", err)
+		} else {
+			c.driver.Store(&driverRef{d: nd})
+			c.gen.Add(1) // reader drops stale state on the next frame
+			c.ResetSystem()
+			time.Sleep(resetWait)
+			if c.hook != nil {
+				if herr := c.hook(attempt, cause); herr != nil {
+					c.log.Warn("reconnect hook failed, retrying", "attempt", attempt, "error", herr)
+					_ = nd.Close()
+					delay = c.nextDelay(delay)
+					continue
+				}
+			}
+			c.log.Info("driver reconnected", "attempt", attempt)
+			return
+		}
+		delay = c.nextDelay(delay)
+	}
+}
+
+func (c *Core) nextDelay(delay time.Duration) time.Duration {
+	if delay *= 2; delay > reconnectMaxDelay {
+		return reconnectMaxDelay
+	}
+	return delay
 }
 
 // consume parses as many complete frames as available and returns the
@@ -346,7 +507,11 @@ func (c *Core) write(m *Message) {
 
 func (c *Core) writeLocked(m *Message) error {
 	frame := m.Encode()
-	if _, err := c.driver.Write(frame); err != nil {
+	d := c.currentDriver()
+	if d == nil {
+		return ErrDriverClosed
+	}
+	if _, err := d.Write(frame); err != nil {
 		c.log.Warn("driver write", "id", m.ID.String(), "error", err)
 		return err
 	}
