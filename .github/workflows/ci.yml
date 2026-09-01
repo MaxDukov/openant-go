@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install libusb (Linux)
+        run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0-dev pkg-config
+        if: runner.os == 'Linux'
+
+      - name: Install libusb (macOS)
+        run: brew install libusb pkg-config
+        if: runner.os == 'macOS'
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "Files not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Staticcheck
+        uses: dominikh/staticcheck-action@v1
+        with:
+          version: "2025.1.1"
+
+      - name: Test
+        run: go test -race -timeout 10m ./...
+
+      - name: Build examples and CLI
+        run: go build ./examples/... ./cmd/...
