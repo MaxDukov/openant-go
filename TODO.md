@@ -132,5 +132,9 @@ the PR). Fixed items are checked and reference the commit topics.
       - `controls_device` 0x47 reply payload assembly.
 - [ ] Continuous fuzzing in CI (longer budgets, corpus caching).
 - [ ] Benchmarks for the reader loop and page decoders.
-- [ ] GitHub Actions CI: vet, test -race, build examples, golangci-lint.
+- [x] GitHub Actions CI (ubuntu): gofmt, vet, staticcheck 2025.1.1,
+      `go test -race`, build examples+CLI; branch protection requires the
+      "test" check on PRs (macOS dropped — not a target architecture).
+- [ ] golangci-lint as an additional CI linter (staticcheck already covers
+      the core).
 
