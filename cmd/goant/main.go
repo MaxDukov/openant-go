@@ -19,6 +19,8 @@ Usage:
 Commands:
 
 	scan	Scan for nearby ANT+ devices and optionally print device data
+	antfs-scan
+		Search for nearby ANT-FS devices by listening for beacons
 	sticks	List attached ANT USB sticks by serial number
 	version	Print the version
 `
@@ -34,6 +36,11 @@ func main() {
 	case "scan":
 		if err := runScan(args); err != nil {
 			fmt.Fprintln(os.Stderr, "scan:", err)
+			os.Exit(1)
+		}
+	case "antfs-scan":
+		if err := runAntfsScan(args); err != nil {
+			fmt.Fprintln(os.Stderr, "antfs-scan:", err)
 			os.Exit(1)
 		}
 	case "sticks":

@@ -175,6 +175,12 @@ func (a *Application) Channel() *easy.Channel { return a.channel }
 // Node returns the underlying easy node.
 func (a *Application) Node() *easy.Node { return a.node }
 
+// Incoming exposes the raw stream of received beacons. Application.Start
+// consumes the same stream for its state machine; when it is not running
+// (e.g. a beacon-only scanner) this channel delivers every beacon heard,
+// which addresses openant issue #66 (ANT-FS device scanner).
+func (a *Application) Incoming() <-chan Beacon { return a.beacons }
+
 // onData classifies incoming data into beacons and commands, mirroring
 // openant's _on_data. The payload length is controlled by the RF peer,
 // so every branch must be bounds-checked (code review PR #1, P0-1).

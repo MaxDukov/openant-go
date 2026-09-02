@@ -79,12 +79,21 @@ the PR). Fixed items are checked and reference the commit topics.
       0x04 (muscle/bone mass) and 0x3A (user profile: gender/age/height),
       with 0xFFFF/0xFFFE invalid handling. Profile parity with openant is
       now complete.
-- [ ] **#66 ANT-FS device scanner** — CLI (`goant antfs-scan`) to discover
-      ANT-FS beacons alongside `scan`.
-- [ ] **#83 Bicycle lights TX coverage** — mode description page (0x05)
-      decoding, factory configs.
-- [ ] **#35 Connect to a specific device** — helper on profiles to attach
-      by serial/name (channel reattach logic exists; needs friendly API).
+- [x] **#66 ANT-FS device scanner** — DONE: `goant antfs-scan` listens for
+      ANT-FS beacons on the standard search channel (period 4096, RF 50,
+      waveform 0x53,0x00, device type 0x01) and prints every unique device
+      (serial, descriptor, pairing/data flags) until Ctrl+C or -timeout;
+      backed by the new fs.Application.Incoming.
+- [x] **#83 Bicycle lights TX coverage** — DONE (decoding part): mode
+      description page 0x05 decoder per the official ANT+ Bike Lights
+      spec Rev 2.0 Table 7-18 (mode number, pattern, segment time,
+      duration, colour, 12 two-bit pattern segments; verified against
+      the spec's own worked example). No factory pages exist in the
+      spec, so there is nothing further to decode; TX already covered
+      by SetLight/Disconnect/RequestDP.
+- [x] **#35 Connect to a specific device** — DONE: WaitFound helper on
+      every profile: create with the known device ID and block until the
+      first broadcast (or timeout). Documented in the package docs.
 - [ ] **#67/#91 Multiple dongles** — support several concurrent nodes in
       CLI tools with one goroutine per stick.
 - [x] **#59 Documentation** — DONE: package docs (doc.go for ant/easy/

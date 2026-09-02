@@ -23,6 +23,14 @@
 // Environment, FitnessEquipment, HeartRate, Lev, PowerMeter, Shift,
 // DropperSeatpost, TirePressureMonitor, StrideSpeedDistance, WeightScale.
 //
+// To attach to a specific device, pass its ID to the constructor and wait
+// for it to appear with [baseDevice.WaitFound]:
+//
+//	d, _ := devices.NewHeartRate(n, 41234, 0)
+//	if err := d.WaitFound(30 * time.Second); err != nil {
+//	    // sensor with that ID never showed up
+//	}
+//
 // # Scanner
 //
 // [Scanner] listens on all device types at once ([NewScanner]) and reports

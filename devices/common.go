@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -263,6 +264,9 @@ type baseDevice struct {
 	attached  bool
 	pageCount int // for interleaving master pages
 
+	foundMu sync.Mutex
+	foundCh chan struct{} // closed when found flips to true
+
 	Common    CommonData
 	Batteries [15]BatteryData
 
@@ -292,6 +296,35 @@ func (d *baseDevice) Node() *easy.Node { return d.node }
 
 // Found reports whether the device has been found at least once.
 func (d *baseDevice) Found() bool { return d.found.Load() }
+
+// foundSignal returns the channel that is closed when the device is
+// found. Safe for concurrent use.
+func (d *baseDevice) foundSignal() <-chan struct{} {
+	d.foundMu.Lock()
+	defer d.foundMu.Unlock()
+	if d.foundCh == nil {
+		d.foundCh = make(chan struct{})
+	}
+	return d.foundCh
+}
+
+// WaitFound blocks until the device transmits its first data packet
+// (meaning it is present and attached) or the timeout elapses, whichever
+// comes first. It is nil-safe with respect to the internal channel and
+// addresses openant issue #35 (connect to a specific device): create the
+// profile with the known device ID and wait for it to appear.
+func (d *baseDevice) WaitFound(timeout time.Duration) error {
+	ch := d.foundSignal()
+	if d.Found() {
+		return nil
+	}
+	select {
+	case <-ch:
+		return nil
+	case <-time.After(timeout):
+		return fmt.Errorf("device %s not found within %s", d.String(), timeout)
+	}
+}
 
 // openChannel configures and opens the device channel (openant
 // AntPlusDevice.open_channel).
@@ -406,9 +439,11 @@ func (d *baseDevice) onData(data []byte) {
 
 	if !d.found.Load() {
 		d.found.Store(true)
+		d.foundSignal() // ensure a waiter channel exists before closing
 		if d.OnFound != nil {
 			d.OnFound()
 		}
+		close(d.foundCh)
 	}
 
 	// Common pages read bytes up to data[7]; require a full page

@@ -124,3 +124,62 @@ func TestWeightScalePages(t *testing.T) {
 		t.Fatal("timeout waiting for invalid page")
 	}
 }
+
+func TestBicycleLightsModeDescription(t *testing.T) {
+	n, sim := newTestNode(t)
+	b, err := NewBicycleLights(n, 0, 0)
+	if err != nil {
+		t.Fatalf("NewBicycleLights: %v", err)
+	}
+	got := make(chan ModeDescription, 4)
+	b.OnDeviceData = func(page int, name string, d DeviceData) {
+		if m, ok := d.(ModeDescription); ok && name == "mode_description" {
+			got <- m
+		}
+	}
+
+	// Worked example from the ANT+ Bike Lights spec, section 7.8.6.1:
+	// pattern 'OO OM OHH' packs as bytes 5:7 = 0x80, 0x3C, 0x00.
+	// byte2: mode 63 (0x3F), pattern defined (2<<6); byte3: 5 x 10ms
+	// segment time; byte4: 5s duration, colour amber.
+	sim.EmitBroadcast(0, []byte{0x05, 0x01, 0xBF, 5, 0x45, 0x80, 0x3C, 0x00})
+	select {
+	case m := <-got:
+		if m.LightIndex != 1 || m.ModeNumber != 63 || m.Pattern != PatternDefined {
+			t.Fatalf("mode description header: %+v", m)
+		}
+		if m.SegmentTime != 50 || m.ModeDuration != 5 || m.Colour != ColourAmber {
+			t.Fatalf("mode description fields: %+v", m)
+		}
+		want := [12]byte{SegmentOff, SegmentOff, SegmentOff, SegmentMedium,
+			SegmentOff, SegmentHigh, SegmentHigh, SegmentOff,
+			SegmentOff, SegmentOff, SegmentOff, SegmentOff}
+		if m.Segments != want {
+			t.Fatalf("segments = %v, want %v", m.Segments, want)
+		}
+		if b.ModeDescriptions[63].ModeNumber != 63 {
+			t.Fatalf("not stored by mode number: %+v", b.ModeDescriptions)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for mode description")
+	}
+}
+
+func TestWaitFound(t *testing.T) {
+	n, sim := newTestNode(t)
+	hr, err := NewHeartRate(n, 0, 0)
+	if err != nil {
+		t.Fatalf("NewHeartRate: %v", err)
+	}
+	if err := hr.WaitFound(time.Millisecond); err == nil {
+		t.Fatal("WaitFound succeeded before any data")
+	}
+	sim.EmitBroadcast(0, []byte{0x00, 0, 0, 0, 0, 4, 60, 150})
+	if err := hr.WaitFound(2 * time.Second); err != nil {
+		t.Fatalf("WaitFound after broadcast: %v", err)
+	}
+	// Already found: returns immediately.
+	if err := hr.WaitFound(time.Millisecond); err != nil {
+		t.Fatalf("WaitFound when already found: %v", err)
+	}
+}

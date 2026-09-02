@@ -79,6 +79,50 @@ func LightModeFromByte(b byte) LightMode {
 	return LightMode(b)
 }
 
+// LightPattern is the beam variation of a custom mode (mode description
+// page pattern field, spec Table 7-20).
+type LightPattern byte
+
+// Pattern types.
+const (
+	PatternSteady   LightPattern = 0
+	PatternRandom   LightPattern = 1
+	PatternDefined  LightPattern = 2
+	PatternReserved LightPattern = 3
+)
+
+// Light colour values (mode description page colour field).
+const (
+	ColourDefault byte = 0
+	ColourWhite   byte = 1
+	ColourAmber   byte = 2
+	ColourRed     byte = 3
+	ColourInvalid byte = 7
+)
+
+// Pattern segment intensity levels (spec Table 7-21).
+const (
+	SegmentOff    byte = 0
+	SegmentLow    byte = 1
+	SegmentMedium byte = 2
+	SegmentHigh   byte = 3
+)
+
+// ModeDescription describes one custom mode from data page 5 (0x05,
+// spec Table 7-18).
+type ModeDescription struct {
+	LightIndex   int          `influx:"light_index"`
+	ModeNumber   int          `influx:"mode_number"` // 0-63 (custom modes: 63 down)
+	Pattern      LightPattern `influx:"pattern"`
+	SegmentTime  int          `influx:"segment_time"`  // ms, 0 = invalid
+	ModeDuration int          `influx:"mode_duration"` // s, 0 = continuous
+	Colour       byte         `influx:"colour"`        // Colour* constants
+	Segments     [12]byte     `influx:"-"`             // intensity levels, Segment* constants
+}
+
+// DataName implements DeviceData.
+func (ModeDescription) DataName() string { return "ModeDescription" }
+
 // Intensity sentinel values.
 const (
 	LightIntensityBrakeOverride byte = 0xFD
@@ -142,16 +186,20 @@ func (BicycleLightsCapabilities) DataName() string { return "BicycleLightsCapabi
 // BicycleLights is the ANT+ bicycle lights profile (device type 35).
 type BicycleLights struct {
 	baseDevice
-	Data         BicycleLightsData
-	Capabilities BicycleLightsCapabilities
-	SubLights    map[int]SubLightData
+	Data             BicycleLightsData
+	Capabilities     BicycleLightsCapabilities
+	SubLights        map[int]SubLightData
+	ModeDescriptions map[int]ModeDescription // keyed by mode number
 
 	commandSequence byte
 }
 
 // NewBicycleLights creates the profile.
 func NewBicycleLights(node *easy.Node, deviceID int, transType int) (*BicycleLights, error) {
-	b := &BicycleLights{SubLights: map[int]SubLightData{}}
+	b := &BicycleLights{
+		SubLights:        map[int]SubLightData{},
+		ModeDescriptions: map[int]ModeDescription{},
+	}
 	b.node = node
 	b.log = defaultLogger()
 	b.DeviceType = int(DeviceTypeBicycleLights)
@@ -235,7 +283,32 @@ func (b *BicycleLights) onData(data []byte) {
 			b.SubLights[subBIndex] = subB
 			b.fireDeviceData(int(data[0]), "sub_light_state", subB)
 		}
+
+	case 0x05: // Mode Description (custom mode details; spec Table 7-18)
+		m := decodeModeDescription(data)
+		b.ModeDescriptions[m.ModeNumber] = m
+		b.fireDeviceData(int(data[0]), "mode_description", m)
 	}
+}
+
+// decodeModeDescription decodes data page 5. The 12 pattern segments are
+// packed two bits each into bytes 5-7, least significant pair first
+// (spec 7.8.6: the worked example 'OO OM OHH' packs as bytes
+// 0x80, 0x3C, 0x00).
+func decodeModeDescription(data []byte) ModeDescription {
+	m := ModeDescription{
+		LightIndex:   int(data[1] & 0x3F),
+		ModeNumber:   int(data[2] & 0x3F),
+		Pattern:      LightPattern(data[2] >> 6),
+		SegmentTime:  int(data[3]) * 10,
+		ModeDuration: int(data[4] & 0x1F),
+		Colour:       (data[4] >> 5) & 0x07,
+	}
+	segs := uint32(data[5]) | uint32(data[6])<<8 | uint32(data[7])<<16
+	for i := 0; i < 12; i++ {
+		m.Segments[i] = byte((segs >> (2 * i)) & 0x3)
+	}
+	return m
 }
 
 // SetLightOption configures a Light Settings command (page 34).
