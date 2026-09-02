@@ -79,6 +79,22 @@ func NewSerial(serial string, opts ...NodeOption) (*Node, error) {
 	return NewWithDriver(d, opts...)
 }
 
+// NewStick opens a node on the specific stick described by info (openant
+// issues #67/#91). Use ant.Sticks to discover the attached sticks. The
+// reconnect factory is bound to the same stick, so a node watching stick
+// A never re-opens stick B, even when the sticks have identical or
+// unreadable serial numbers.
+func NewStick(info ant.StickInfo, opts ...NodeOption) (*Node, error) {
+	opts = append([]NodeOption{WithReopen(func() (ant.Driver, error) {
+		return ant.NewDriverForStick(info)
+	})}, opts...)
+	d, err := ant.FindDriverForStick(info)
+	if err != nil {
+		return nil, fmt.Errorf("easy: find driver: %w", err)
+	}
+	return NewWithDriver(d, opts...)
+}
+
 // NewWithDriver builds a Node on top of a custom driver (e.g. the anttest
 // mock). The driver is opened by the node and reset is issued. Automatic
 // reconnect is only enabled when the WithReopen option provides a way to

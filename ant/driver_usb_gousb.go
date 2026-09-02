@@ -16,8 +16,11 @@ import (
 
 // usbDriver talks to ANT USB sticks (ANTUSB2 0fcf:1008 and ANTUSB-m
 // 0fcf:1009) via libusb bulk transfers, mirroring openant.base.driver.USBDriver.
+// A driver whose want field is set binds to that specific stick
+// (bus/address), which is how several identical sticks coexist.
 type usbDriver struct {
-	pid uint16
+	pid  uint16
+	want StickInfo
 
 	mu     sync.Mutex
 	ctx    *gousb.Context
@@ -43,6 +46,79 @@ func probeUSB(pid uint16) (bool, string) {
 	return true, serial
 }
 
+// listUSB enumerates every attached stick with the given product id,
+// reading each serial number (empty when the descriptor is broken, as on
+// some CYCPLUS clones).
+func listUSB(pid uint16) []StickInfo {
+	ctx := gousb.NewContext()
+	defer ctx.Close()
+	var out []StickInfo
+	devs, err := ctx.OpenDevices(func(desc *gousb.DeviceDesc) bool {
+		return desc.Vendor == gousb.ID(ANTVendorID) && desc.Product == gousb.ID(pid)
+	})
+	// err reports the last open failure, if any; successfully opened
+	// devices are still returned and must be closed.
+	if err != nil {
+		for _, d := range devs {
+			d.Close()
+		}
+		return nil
+	}
+	for _, d := range devs {
+		serial, _ := d.SerialNumber()
+		out = append(out, StickInfo{
+			Serial:  serial,
+			Product: usbFactoryName(pid),
+			Bus:     d.Desc.Bus,
+			Address: d.Desc.Address,
+		})
+		d.Close()
+	}
+	return out
+}
+
+// usbFactoryName maps a product id to the registered driver name.
+func usbFactoryName(pid uint16) string {
+	if pid == ANTProductUSBm {
+		return "usb3"
+	}
+	return "usb2"
+}
+
+// openStickFor opens the stick selected by the want filter (bus/address).
+// want.Bus == 0 means "any stick", which preserves the old behaviour of
+// taking the first matching device.
+func openStickFor(ctx *gousb.Context, pid uint16, want StickInfo) (*gousb.Device, error) {
+	if want.Bus == 0 {
+		dev, err := ctx.OpenDeviceWithVIDPID(gousb.ID(ANTVendorID), gousb.ID(pid))
+		if err != nil || dev == nil {
+			if err == nil {
+				err = ErrDriverNotFound
+			}
+			return nil, err
+		}
+		return dev, nil
+	}
+	devs, err := ctx.OpenDevices(func(desc *gousb.DeviceDesc) bool {
+		return desc.Vendor == gousb.ID(ANTVendorID) && desc.Product == gousb.ID(pid)
+	})
+	if err != nil && len(devs) == 0 {
+		return nil, err
+	}
+	var found *gousb.Device
+	for _, d := range devs {
+		if found == nil && d.Desc.Bus == want.Bus && d.Desc.Address == want.Address {
+			found = d
+			continue
+		}
+		d.Close()
+	}
+	if found == nil {
+		return nil, fmt.Errorf("usb: no ANT stick at bus %d addr %d: %w", want.Bus, want.Address, ErrDriverNotFound)
+	}
+	return found, nil
+}
+
 func init() {
 	for _, spec := range []struct {
 		name     string
@@ -60,11 +136,17 @@ func init() {
 				return ok
 			},
 			Serials: func() []string {
-				ok, serial := probeUSB(spec.pid)
-				if !ok {
-					return nil
+				var out []string
+				for _, s := range listUSB(spec.pid) {
+					if s.Serial != "" {
+						out = append(out, s.Serial)
+					}
 				}
-				return []string{serial}
+				return out
+			},
+			List: func() []StickInfo { return listUSB(spec.pid) },
+			NewForStick: func(s StickInfo) Driver {
+				return &usbDriver{pid: spec.pid, want: s}
 			},
 		}
 		pid := spec.pid
@@ -115,12 +197,9 @@ func (u *usbDriver) Open() error {
 		return nil // already open
 	}
 	ctx := gousb.NewContext()
-	dev, err := ctx.OpenDeviceWithVIDPID(gousb.ID(ANTVendorID), gousb.ID(u.pid))
-	if err != nil || dev == nil {
+	dev, err := openStickFor(ctx, u.pid, u.want)
+	if err != nil {
 		ctx.Close()
-		if err == nil {
-			err = ErrDriverNotFound
-		}
 		return fmt.Errorf("usb: open 0x%04X:0x%04X: %w", ANTVendorID, u.pid, err)
 	}
 	// Best-effort kernel driver auto-detach (Linux); failures are not fatal,

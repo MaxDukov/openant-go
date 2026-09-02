@@ -2,6 +2,7 @@ package ant
 
 import (
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -273,5 +274,40 @@ func TestCoreReconnectGiveUpOnStop(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Stop blocked during reconnect retry loop")
+	}
+}
+
+func TestSticksFrom(t *testing.T) {
+	factories := []DriverFactory{
+		{
+			Name: "usb2",
+			List: func() []StickInfo {
+				return []StickInfo{
+					{Serial: "b", Bus: 1, Address: 4},
+					{Serial: "", Bus: 1, Address: 3},
+				}
+			},
+		},
+		{
+			Name: "usb3",
+			List: func() []StickInfo {
+				return []StickInfo{{Serial: "a", Bus: 2, Address: 1}}
+			},
+		},
+		{Name: "serial"}, // no List hook
+	}
+	got := sticksFrom(factories)
+	want := []StickInfo{
+		{Serial: "", Product: "usb2", Bus: 1, Address: 3},
+		{Serial: "b", Product: "usb2", Bus: 1, Address: 4},
+		{Serial: "a", Product: "usb3", Bus: 2, Address: 1},
+	}
+	if !slices.EqualFunc(got, want, func(a, b StickInfo) bool {
+		return a.Serial == b.Serial && a.Product == b.Product && a.Bus == b.Bus && a.Address == b.Address
+	}) {
+		t.Fatalf("sticksFrom = %v, want %v", got, want)
+	}
+	if s := want[0].String(); s != "usb2 serial=<unreadable> bus=1 addr=3" {
+		t.Fatalf("String() = %q", s)
 	}
 }

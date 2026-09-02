@@ -6,20 +6,29 @@ import (
 	"github.com/maxdukov/openant-go/ant"
 )
 
-// runSticks prints the serial numbers of all attached ANT sticks so the
-// user can pick one for `goant scan -serial` (openant issue #116).
+// runSticks prints all attached ANT sticks so the user can pick one for
+// `goant scan -serial`, or several for -serials/-all (openant issues
+// #67/#91).
 func runSticks() {
-	serials := ant.Serials()
-	if len(serials) == 0 {
-		fmt.Println("No ANT sticks with readable serial numbers found.")
-		fmt.Println("Note: some sticks (e.g. CYCPLUS clones) report broken USB serial")
-		fmt.Println("descriptors and cannot be selected by serial; they still work with")
-		fmt.Println("'goant scan' without -serial.")
+	sticks := ant.Sticks()
+	if len(sticks) == 0 {
+		fmt.Println("No ANT sticks found.")
 		return
 	}
 	fmt.Println("Attached ANT sticks:")
-	for _, s := range serials {
+	serialless := false
+	for _, s := range sticks {
 		fmt.Printf("  %s\n", s)
+		if s.Serial == "" {
+			serialless = true
+		}
 	}
-	fmt.Println("\nUse with: goant scan -serial <number>")
+	fmt.Println("\nUse with:")
+	fmt.Println("  goant scan -serial <number>   single stick with a readable serial")
+	fmt.Println("  goant scan -serials a,b       several sticks (serials or bus:addr)")
+	fmt.Println("  goant scan -all               every attached stick")
+	if serialless {
+		fmt.Println("\nNote: some sticks (e.g. CYCPLUS clones) report broken USB serial")
+		fmt.Println("descriptors; select those by bus:addr, e.g. -serials 1:3.")
+	}
 }

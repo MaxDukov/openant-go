@@ -7,8 +7,12 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
+	"sync"
 	"syscall"
 
+	"github.com/maxdukov/openant-go/ant"
 	"github.com/maxdukov/openant-go/devices"
 	"github.com/maxdukov/openant-go/easy"
 )
@@ -24,6 +28,87 @@ type scanArgs struct {
 	autoCreate bool
 	logLevel   string
 	serial     string
+	serials    string
+	allSticks  bool
+}
+
+// stickLauncher describes one node to run: how to open it and how to
+// label its output when several sticks scan in parallel (openant issues
+// #67/#91).
+type stickLauncher struct {
+	label string
+	open  func() (*easy.Node, error)
+}
+
+// resolveSticks builds the launcher list from the -serial, -serials and
+// -all flags. Sticks are picked either by serial number or, for sticks
+// with unreadable serial descriptors, by "bus:addr" spec.
+func resolveSticks(a scanArgs) ([]stickLauncher, error) {
+	if a.serials == "" && !a.allSticks {
+		return []stickLauncher{{
+			label: "",
+			open:  func() (*easy.Node, error) { return easy.NewSerial(a.serial) },
+		}}, nil
+	}
+	var specs []string
+	if a.allSticks {
+		for _, info := range ant.Sticks() {
+			specs = append(specs, info.Serial, fmt.Sprintf("%d:%d", info.Bus, info.Address))
+		}
+		if len(specs) == 0 {
+			return nil, fmt.Errorf("no ANT sticks attached")
+		}
+	} else {
+		for _, s := range strings.Split(a.serials, ",") {
+			if s = strings.TrimSpace(s); s != "" {
+				specs = append(specs, s)
+			}
+		}
+	}
+	infos := ant.Sticks()
+	var out []stickLauncher
+	seen := make(map[ant.StickInfo]bool)
+	for _, spec := range specs {
+		info, err := matchStick(infos, spec)
+		if err != nil {
+			return nil, err
+		}
+		if seen[info] {
+			continue
+		}
+		seen[info] = true
+		label := info.Serial
+		if label == "" {
+			label = fmt.Sprintf("%d:%d", info.Bus, info.Address)
+		}
+		out = append(out, stickLauncher{
+			label: label,
+			open:  func() (*easy.Node, error) { return easy.NewStick(info) },
+		})
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no matching ANT sticks; list them with 'goant sticks'")
+	}
+	return out, nil
+}
+
+// matchStick finds a stick by serial number or "bus:addr" spec.
+func matchStick(infos []ant.StickInfo, spec string) (ant.StickInfo, error) {
+	for _, info := range infos {
+		if info.Serial == spec {
+			return info, nil
+		}
+		bus, addr, ok := strings.Cut(spec, ":")
+		if !ok {
+			continue
+		}
+		b, errB := strconv.Atoi(strings.TrimSpace(bus))
+		ad, errA := strconv.Atoi(strings.TrimSpace(addr))
+		if errB == nil && errA == nil && info.Bus == b && info.Address == ad {
+			return info, nil
+		}
+	}
+	return ant.StickInfo{}, fmt.Errorf("no ANT stick matching %q (see 'goant sticks')", spec)
 }
 
 func runScan(argv []string) error {
@@ -51,8 +136,17 @@ Options:
 	fs.StringVar(&a.logLevel, "logging", "WARN", "log level: DEBUG, INFO, WARN, ERROR")
 	fs.StringVar(&a.serial, "serial", "", "serial number of the USB stick to use (see 'goant sticks'); empty = first found")
 	fs.StringVar(&a.serial, "s", "", "shorthand for -serial")
+	fs.StringVar(&a.serials, "serials", "", "comma-separated list of sticks to scan on (serial numbers or bus:addr); enables multi-dongle scanning")
+	fs.BoolVar(&a.allSticks, "all", false, "scan on every attached ANT stick (multi-dongle)")
 	if err := fs.Parse(argv); err != nil {
 		return err
+	}
+
+	if a.serials != "" && a.serial != "" {
+		return fmt.Errorf("-serial and -serials are mutually exclusive")
+	}
+	if a.allSticks && a.outfile != "" {
+		return fmt.Errorf("-outfile is not supported with -all (use it with a single stick)")
 	}
 
 	level := slog.LevelWarn
@@ -73,16 +167,51 @@ Options:
 		return fmt.Errorf("unknown device type %q (choose from %s)", a.deviceType, deviceTypeNames())
 	}
 
+	launchers, err := resolveSticks(a)
+	if err != nil {
+		return err
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	node, err := easy.NewSerial(a.serial, easy.WithNodeLogger(logger))
+	if len(launchers) == 1 {
+		return scanNode(ctx, launchers[0], a, dt, logger)
+	}
+
+	// Multi-dongle: one goroutine per stick, output labelled by stick.
+	fmt.Printf("Scanning on %d sticks\n", len(launchers))
+	var wg sync.WaitGroup
+	for _, l := range launchers {
+		wg.Add(1)
+		l := l
+		go func() {
+			defer wg.Done()
+			if err := scanNode(ctx, l, a, dt, logger); err != nil {
+				fmt.Fprintf(os.Stderr, "[%s] scan stopped: %v\n", l.label, err)
+			}
+		}()
+	}
+	wg.Wait()
+	return nil
+}
+
+// scanNode runs the scanner loop on one node.
+func scanNode(ctx context.Context, l stickLauncher, a scanArgs, dt devices.DeviceType, logger *slog.Logger) error {
+	node, err := l.open()
 	if err != nil {
-		return err
+		return fmt.Errorf("open stick: %w", err)
 	}
 	defer node.Stop()
 	if err := node.SetNetworkKey(0x00, devices.ANTPLUS_NETWORK_KEY); err != nil {
 		return err
+	}
+	p := func(format string, args ...any) {
+		if l.label != "" {
+			fmt.Printf("[%s] "+format+"\n", append([]any{l.label}, args...)...)
+			return
+		}
+		fmt.Printf(format+"\n", args...)
 	}
 
 	var autoDev any
@@ -91,7 +220,7 @@ Options:
 		return err
 	}
 	scanner.OnScanFound = func(t devices.DeviceTuple) {
-		fmt.Printf("Found new device %s\n", t.String())
+		p("Found new device %s", t.String())
 		if a.autoCreate && autoDev == nil && t.Type != int(devices.DeviceTypeUnknown) {
 			// Attach a concrete profile for the first matching device.
 			d, err := devices.AutoCreateDevice(node, t.ID, devices.DeviceType(t.Type), t.Trans)
@@ -104,7 +233,7 @@ Options:
 				SetOnDeviceData(func(int, string, devices.DeviceData))
 			}); ok {
 				dd.SetOnDeviceData(func(page int, name string, data devices.DeviceData) {
-					fmt.Printf("DeviceData %v page %d (%s): %+v\n", devices.DeviceType(t.Type), page, name, data)
+					p("DeviceData %v page %d (%s): %+v", devices.DeviceType(t.Type), page, name, data)
 				})
 			}
 			logger.Info("auto created device", "type", devices.DeviceType(t.Type).String(), "id", t.ID)
@@ -114,10 +243,10 @@ Options:
 		// Print the vendor name once the device sent common page 80
 		// (openant issue #69).
 		if c.ManufacturerID != 0 && c.ManufacturerID != 0xFFFF {
-			fmt.Printf("Device %s (%s) update: %+v\n", t.String(), devices.ManufacturerName(c.ManufacturerID), c)
+			p("Device %s (%s) update: %+v", t.String(), devices.ManufacturerName(c.ManufacturerID), c)
 			return
 		}
-		fmt.Printf("Device %s update: %+v\n", t.String(), c)
+		p("Device %s update: %+v", t.String(), c)
 	}
 
 	done := node.Start(ctx)
@@ -127,7 +256,7 @@ Options:
 		if err := scanner.Save(a.outfile); err != nil {
 			return err
 		}
-		fmt.Printf("Saved %d devices to %s\n", len(scanner.FoundDevices()), a.outfile)
+		p("Saved %d devices to %s", len(scanner.FoundDevices()), a.outfile)
 	}
 	return nil
 }

@@ -21,6 +21,13 @@
 // #51/#122). Custom drivers opt in via [WithReopen]; without a reopen
 // function driver errors only back off.
 //
+// # Multiple sticks
+//
+// Several sticks can run side by side, one Node each (openant issues
+// #67/#91). Use [ant.Sticks] to enumerate the attached hardware and
+// [NewSerial] or [NewStick] to open a node on a particular stick; each
+// node's reconnect is bound to its own stick.
+//
 // # Example
 //
 // A complete heart-rate monitor listener (uses the anttest simulator here;
