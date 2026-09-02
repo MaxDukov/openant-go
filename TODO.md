@@ -61,23 +61,41 @@ Priorities follow the maintainer's focus: bike trainers (FE-C) and
 heart-rate / health sensors first.
 
 ### FE-C / fitness equipment (high priority)
-- ⬜ **FE-C Command Status page 0x47 RX** — decode last-command verdict
-  (mode, sequence, status pass/pending/failed) like python openant
-  fe.py; warn on failed commands. Useful: without it there is no
-  feedback whether the trainer accepted SetTargetPower etc. (enum
-  FECommandStatus already exists, the onData branch does not).
-- ⬜ **FE-C User Configuration page 0x46 TX** — cyclist weight (0.01 kg
-  LSB, 655.35 kg max), wheel diameter (1 mm LSB), gear ratio (0.03);
-  sent after attach (needs an acknowledged write + optional RequestDP
-  retry loop). Useful: many trainers give wrong resistance/power
-  simulation without it.
-- ⬜ **FE-C Capabilities page 0x48 RX** — which resistance modes the
-  trainer supports (basic/target power/wind/track/user config) and its
-  max power. Useful: pick the right command page automatically.
-- ⬜ **FE-C Metabolic page 0x12 RX** — instantaneous/net calories
-  (health-related: kcal burn during a workout).
-- ⬜ **FE-C Trainer Torque page 0x13 RX** — accumulated torque + cycles;
-  lets a client compute true power independent of the power meter page.
+- ✅ **FE-C Command Status page 0x47 RX** — DONE: common page 71 decoded
+      in full per Rev 5.0 Tables 8-48/8-49 (command ID, sequence,
+      status pass/fail/not-supported/rejected/pending, response data for
+      all four control modes); emitted as a "command_status" device data
+      event (FECommandStatusData) and stored in LastCommand.
+- ✅ **FE-C User Configuration page 0x37 TX** — DONE: SetUserConfig sends
+      the page as acknowledged data per Rev 5.0 Table 8-47: user weight
+      (0.01 kg), bicycle weight (0.05 kg, 12 bits), wheel diameter with
+      millimetre offset nibble, gear ratio (0.03). Note: the page number
+      is 55 (0x37) in Rev 5.0 — 0x46 is the common Request Data Page.
+- ✅ **FE-C Capabilities page 0x36 RX** — DONE: page 54 (0x36) decoded
+      (basic/target power/simulation mode bits, max resistance in
+      Newtons); RequestCapabilities() issues the RequestDP(54, 1).
+- ✅ **FE-C Metabolic page 0x12 RX** — DONE: METs (0.01), caloric burn
+      rate (0.1 kCal/hr), accumulated calories, invalid-field handling
+      (Table 8-13), "metabolic" event + Metabolic field.
+- ✅ **FE-C Trainer pages 0x13 RX and trainer status** — DONE: treadmill
+      page 19 decoded (cadence, +/- vertical distance, Table 8-15);
+      page 25 (0x19) now also decodes trainer status bits (power/
+      resistance calibration required, user config required), target
+      power limit flags and FE state into FETrainerStatusData
+      ("trainer_status" event) so a client can react to the
+      user-config-required request.
+
+  Also fixed while doing this (verified against the official Rev 5.0
+  PDF, docs differ from python openant):
+  - wind page 0x32 and track page 0x33 encoded bytes 1-3 instead of
+    5-7, missed the -127 km/h offset on wind speed and the -200 %
+    offset on grade, used the wrong drafting (levels instead of a
+    0.01 scale factor) and rolling resistance (1/1000 instead of
+    5x10^-5) resolutions, and clamped grade to +/-40 % instead of the
+    specified +/-200 %; SetWindResistance draftingFactor is float64 now.
+  - trainer torque page 0x1A decoded the wheel period from bytes 4-5
+    and torque from bytes 6-7 (inherited from python openant); the
+    spec puts them at bytes 3-4 and 5-6 respectively.
 
 ### Heart rate / health (high priority)
 - ⬜ **HRM master (sensor emulation) mode** — HR/battery TX pages 0x00-
