@@ -23,6 +23,7 @@ type scanArgs struct {
 	deviceID   int
 	autoCreate bool
 	logLevel   string
+	serial     string
 }
 
 func runScan(argv []string) error {
@@ -48,6 +49,8 @@ Options:
 	fs.BoolVar(&a.autoCreate, "auto_create", false, "instantiate device object when found so that device data is also printed")
 	fs.BoolVar(&a.autoCreate, "a", false, "shorthand for -auto_create")
 	fs.StringVar(&a.logLevel, "logging", "WARN", "log level: DEBUG, INFO, WARN, ERROR")
+	fs.StringVar(&a.serial, "serial", "", "serial number of the USB stick to use (see 'goant sticks'); empty = first found")
+	fs.StringVar(&a.serial, "s", "", "shorthand for -serial")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
@@ -73,7 +76,7 @@ Options:
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	node, err := easy.New(easy.WithNodeLogger(logger))
+	node, err := easy.NewSerial(a.serial, easy.WithNodeLogger(logger))
 	if err != nil {
 		return err
 	}
@@ -108,6 +111,12 @@ Options:
 		}
 	}
 	scanner.OnScanUpdate = func(t devices.DeviceTuple, c devices.CommonData) {
+		// Print the vendor name once the device sent common page 80
+		// (openant issue #69).
+		if c.ManufacturerID != 0 && c.ManufacturerID != 0xFFFF {
+			fmt.Printf("Device %s (%s) update: %+v\n", t.String(), devices.ManufacturerName(c.ManufacturerID), c)
+			return
+		}
 		fmt.Printf("Device %s update: %+v\n", t.String(), c)
 	}
 

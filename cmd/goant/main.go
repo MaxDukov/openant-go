@@ -19,6 +19,7 @@ Usage:
 Commands:
 
 	scan	Scan for nearby ANT+ devices and optionally print device data
+	sticks	List attached ANT USB sticks by serial number
 	version	Print the version
 `
 
@@ -35,6 +36,8 @@ func main() {
 			fmt.Fprintln(os.Stderr, "scan:", err)
 			os.Exit(1)
 		}
+	case "sticks":
+		runSticks()
 	case "version", "-v", "--version":
 		fmt.Println("goant", version)
 	case "help", "-h", "--help":

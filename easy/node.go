@@ -61,11 +61,18 @@ type dataEvent struct {
 // resets the stick, as openant does. Automatic reconnect is enabled: if
 // the stick fails or is re-plugged, the node re-opens it and restores all
 // channels and network keys.
-func New(opts ...NodeOption) (*Node, error) {
+func New(opts ...NodeOption) (*Node, error) { return NewSerial("", opts...) }
+
+// NewSerial is New restricted to the USB stick with the given serial
+// number (openant issue #116). An empty serial matches any stick. The
+// reconnect factory is likewise bound to the same stick, so a node
+// watching stick A never re-opens stick B. Use ant.Serials to discover
+// attached serial numbers.
+func NewSerial(serial string, opts ...NodeOption) (*Node, error) {
 	opts = append([]NodeOption{WithReopen(func() (ant.Driver, error) {
-		return ant.NewDriver()
+		return ant.NewDriverForSerial(serial)
 	})}, opts...)
-	d, err := ant.FindDriver()
+	d, err := ant.FindDriverForSerial(serial)
 	if err != nil {
 		return nil, fmt.Errorf("easy: find driver: %w", err)
 	}

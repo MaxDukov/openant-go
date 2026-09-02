@@ -97,6 +97,27 @@ func FindDriverForSerial(serial string) (Driver, error) {
 	return findDriver(serial)
 }
 
+// Serials returns the serial numbers of all attached devices reported by
+// the registered driver factories (unique, sorted). Use it to pick a value
+// for FindDriverForSerial / easy.NewSerial when several sticks are attached.
+func Serials() []string {
+	seen := make(map[string]bool)
+	var out []string
+	for _, f := range Drivers() {
+		if f.Serials == nil {
+			continue
+		}
+		for _, s := range f.Serials() {
+			if s != "" && !seen[s] {
+				seen[s] = true
+				out = append(out, s)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // NewDriver returns a fresh, not yet opened driver for the first matching
 // device found. Unlike FindDriver the caller is responsible for opening it;
 // Core does so when created with WithDriverFactory.

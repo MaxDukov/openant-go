@@ -59,21 +59,27 @@ the PR). Fixed items are checked and reference the commit topics.
 
 - [ ] **#125 Stride-Based Speed and Distance Monitor** — implement device
       profile for device type 124 (only simulated in `broadcast-send` today).
-- [ ] **#126 Wind / Track Resistance** — add FE pages 0x32 (wind) and 0x33
-      (track) including `set_wind_resistance` / `set_track_resistance`
-      commands (page 0x36/0x37 TX).
+- [x] **#126 Wind / Track Resistance** — DONE: FE-C pages 0x32 (wind
+      resistance: coefficient 0..2.54 kg/m, wind speed ±127 km/h,
+      drafting factor) and 0x33 (track resistance: grade ±40 %, rolling
+      resistance coefficient 0..0.015), sent as acknowledged data like
+      SetTargetPower; unit-tested encoders.
+- [x] **#116 Select USB stick by serial** — DONE: ant.FindDriverForSerial
+      and ant.NewDriverForSerial existed; added ant.Serials discovery,
+      easy.NewSerial (reconnect factory bound to the same stick), CLI
+      `goant sticks` lister and `goant scan -serial/-s`.
+- [x] **#69 End device names** — DONE: devices.ManufacturerName covers
+      the ANT+ manufacturer ID registry (as published in the Garmin FIT
+      SDK profile); `goant scan` prints the vendor name with device
+      updates once common page 80 arrives.
 - [ ] **#92 WeightScale profile** — device type 119 (weight, hydration,
       metabolic equivalents).
 - [ ] **#66 ANT-FS device scanner** — CLI (`goant antfs-scan`) to discover
       ANT-FS beacons alongside `scan`.
 - [ ] **#83 Bicycle lights TX coverage** — mode description page (0x05)
       decoding, factory configs.
-- [ ] **#69 End device names** — database mapping (manufacturer id, model)
-      to human readable names for the scanner/CLI output.
 - [ ] **#35 Connect to a specific device** — helper on profiles to attach
       by serial/name (channel reattach logic exists; needs friendly API).
-- [ ] **#116 Select USB stick by serial** — `ant.FindDriverForSerial`
-      exists; expose it in the CLI (`--serial`) and `easy.New` options.
 - [ ] **#67/#91 Multiple dongles** — support several concurrent nodes in
       CLI tools with one goroutine per stick.
 - [x] **#59 Documentation** — DONE: package docs (doc.go for ant/easy/

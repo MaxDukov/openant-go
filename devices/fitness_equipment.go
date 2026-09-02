@@ -362,6 +362,75 @@ func (f *FitnessEquipment) SetBasicResistance(resistance float64) error {
 	return nil
 }
 
+// encodeWindResistancePage builds the wind resistance page 0x32
+// (display → trainer): coefficient in 0.01 kg/m units (invalid 0xFF),
+// wind speed int8 km/h (invalid 0x80), drafting factor 0-15 (0xF
+// invalid; 1 = no drafting, 2 = half protection, 3 = full protection).
+func encodeWindResistancePage(coefficient float64, windSpeed, draftingFactor int) ([]byte, error) {
+	raw := int(math.Round(coefficient * 100))
+	if coefficient < 0 || raw > 254 {
+		return nil, fmt.Errorf("wind resistance coefficient %v out of range 0..2.54 kg/m", coefficient)
+	}
+	if windSpeed < -127 || windSpeed > 127 {
+		return nil, fmt.Errorf("wind speed %d out of range -127..127 km/h", windSpeed)
+	}
+	if draftingFactor < 0 || draftingFactor > 15 {
+		return nil, fmt.Errorf("drafting factor %d out of range 0..15", draftingFactor)
+	}
+	data := []byte{0x32, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
+	data[1] = byte(raw)
+	data[2] = byte(windSpeed)
+	data[3] = byte(draftingFactor)
+	return data, nil
+}
+
+// SetWindResistance sends the wind resistance page 0x32: the wind
+// resistance coefficient (0..2.54 kg/m), the wind speed (-127..127 km/h,
+// positive is a headwind) and the drafting factor (0 = no draft
+// calculation, 1 = no drafting, 2 = half protection, 3 = full
+// protection, 4-14 reserved, 15 = invalid). Addresses openant issue #126.
+func (f *FitnessEquipment) SetWindResistance(coefficient float64, windSpeed, draftingFactor int) error {
+	data, err := encodeWindResistancePage(coefficient, windSpeed, draftingFactor)
+	if err != nil {
+		return err
+	}
+	f.SendAcknowledgedData(data)
+	f.RequestDP(71, 1)
+	return nil
+}
+
+// encodeTrackResistancePage builds the track resistance page 0x33
+// (display → trainer): grade as int16 in 0.01 % units (invalid 0x7FFF)
+// and rolling resistance coefficient in 0.001 units (0-15, invalid 0xF).
+func encodeTrackResistancePage(grade, rollingResistanceCoefficient float64) ([]byte, error) {
+	raw := int(math.Round(grade * 100))
+	if raw < -4000 || raw > 4000 {
+		return nil, fmt.Errorf("grade %v out of range -40..40 %%", grade)
+	}
+	rolling := int(math.Round(rollingResistanceCoefficient * 1000))
+	if rollingResistanceCoefficient < 0 || rolling > 15 {
+		return nil, fmt.Errorf("rolling resistance coefficient %v out of range 0..0.015", rollingResistanceCoefficient)
+	}
+	data := []byte{0x33, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
+	data[1] = byte(raw)
+	data[2] = byte(raw >> 8)
+	data[3] = byte(rolling)
+	return data, nil
+}
+
+// SetTrackResistance sends the track resistance page 0x33: the grade
+// (-40..40 %, positive is uphill) and the rolling resistance
+// coefficient (0..0.015). Addresses openant issue #126.
+func (f *FitnessEquipment) SetTrackResistance(grade, rollingResistanceCoefficient float64) error {
+	data, err := encodeTrackResistancePage(grade, rollingResistanceCoefficient)
+	if err != nil {
+		return err
+	}
+	f.SendAcknowledgedData(data)
+	f.RequestDP(71, 1)
+	return nil
+}
+
 // CloseChannel stops the workout worker before closing the channel.
 func (f *FitnessEquipment) CloseChannel() {
 	if f.cancelWorkout != nil {
