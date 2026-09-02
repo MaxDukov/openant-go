@@ -51,7 +51,7 @@ func main() {
 // deviceTypeNames renders the profile names for help text.
 func deviceTypeNames() string {
 	names := []string{"Unknown"}
-	for _, t := range []int{11, 16, 17, 25, 34, 35, 48, 115, 120, 121, 122, 123, 124, 20, 127} {
+	for _, t := range []int{11, 16, 17, 25, 34, 35, 48, 115, 119, 120, 121, 122, 123, 124, 20, 127} {
 		if n := deviceTypeName(t); n != "Unknown" {
 			names = append(names, n)
 		}

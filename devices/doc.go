@@ -20,8 +20,8 @@
 //	d.Stop()
 //
 // Available profiles: BikeCadence, BikeSpeed, BikeSpeedCadence, Control,
-// Environment, FitnessEquipment, HeartRate, Lev, MuscleOxygen,
-// PowerMeter, Shift, DropperSeatpost, TirePressureMonitor, StrideSpeedDistance.
+// Environment, FitnessEquipment, HeartRate, Lev, PowerMeter, Shift,
+// DropperSeatpost, TirePressureMonitor, StrideSpeedDistance, WeightScale.
 //
 // # Scanner
 //

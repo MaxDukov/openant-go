@@ -57,8 +57,10 @@ the PR). Fixed items are checked and reference the commit topics.
 
 ## Features (from open issues)
 
-- [ ] **#125 Stride-Based Speed and Distance Monitor** — implement device
-      profile for device type 124 (only simulated in `broadcast-send` today).
+- [x] **#125 Stride-Based Speed and Distance Monitor** — DONE: profile for
+      device type 124 (period 8134), main data page 0x01 (update latency,
+      distance, speed, stride count) with invalid-field handling; layout
+      matches openant's broadcast_send simulation.
 - [x] **#126 Wind / Track Resistance** — DONE: FE-C pages 0x32 (wind
       resistance: coefficient 0..2.54 kg/m, wind speed ±127 km/h,
       drafting factor) and 0x33 (track resistance: grade ±40 %, rolling
@@ -72,8 +74,11 @@ the PR). Fixed items are checked and reference the commit topics.
       the ANT+ manufacturer ID registry (as published in the Garmin FIT
       SDK profile); `goant scan` prints the vendor name with device
       updates once common page 80 arrives.
-- [ ] **#92 WeightScale profile** — device type 119 (weight, hydration,
-      metabolic equivalents).
+- [x] **#92 WeightScale profile** — DONE: device type 119 decoding TX pages
+      0x01 (weight), 0x02 (hydration/body fat %), 0x03 (metabolic rates),
+      0x04 (muscle/bone mass) and 0x3A (user profile: gender/age/height),
+      with 0xFFFF/0xFFFE invalid handling. Profile parity with openant is
+      now complete.
 - [ ] **#66 ANT-FS device scanner** — CLI (`goant antfs-scan`) to discover
       ANT-FS beacons alongside `scan`.
 - [ ] **#83 Bicycle lights TX coverage** — mode description page (0x05)
