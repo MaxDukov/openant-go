@@ -100,6 +100,8 @@ func FindDriverForSerial(serial string) (Driver, error) {
 // Serials returns the serial numbers of all attached devices reported by
 // the registered driver factories (unique, sorted). Use it to pick a value
 // for FindDriverForSerial / easy.NewSerial when several sticks are attached.
+// Sticks with broken USB string descriptors (seen on some CYCPLUS clones)
+// report no serial and cannot be selected by serial number.
 func Serials() []string {
 	seen := make(map[string]bool)
 	var out []string
@@ -133,6 +135,7 @@ func NewDriverForSerial(serial string) (Driver, error) {
 
 // newDriver probes the registry and returns an unopened driver instance.
 func newDriver(serial string) (Driver, error) {
+	serialsSeen := false
 	for _, f := range Drivers() {
 		if !f.Probe() {
 			continue
@@ -145,11 +148,15 @@ func newDriver(serial string) (Driver, error) {
 					break
 				}
 			}
+			serialsSeen = true
 			if !match {
 				continue
 			}
 		}
 		return f.New(), nil
+	}
+	if serial != "" && serialsSeen {
+		return nil, fmt.Errorf("ant: no ANT device with serial %q; list readable serials with ant.Serials or 'goant sticks' (sticks with broken USB serial descriptors, e.g. some CYCPLUS clones, cannot be selected)", serial)
 	}
 	return nil, ErrDriverNotFound
 }

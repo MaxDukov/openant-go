@@ -11,7 +11,10 @@ import (
 func runSticks() {
 	serials := ant.Serials()
 	if len(serials) == 0 {
-		fmt.Println("No ANT sticks found.")
+		fmt.Println("No ANT sticks with readable serial numbers found.")
+		fmt.Println("Note: some sticks (e.g. CYCPLUS clones) report broken USB serial")
+		fmt.Println("descriptors and cannot be selected by serial; they still work with")
+		fmt.Println("'goant scan' without -serial.")
 		return
 	}
 	fmt.Println("Attached ANT sticks:")
