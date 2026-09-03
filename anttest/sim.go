@@ -64,7 +64,8 @@ func (s *SimDriver) respond(m *ant.Message) {
 		ant.IDChannelPeriod, ant.IDChannelSearchTimeout,
 		ant.IDChannelRFFrequency, ant.IDSetNetworkKey, ant.IDSetTransmitPower,
 		ant.IDSetSearchWaveform, ant.IDOpenRxScanMode,
-		ant.IDEnableExtendedMessages, ant.IDEnableLED, ant.IDSetChannelID:
+		ant.IDEnableExtendedMessages, ant.IDEnableLED, ant.IDSetChannelID,
+		ant.IDSetProximitySearch, ant.IDChannelIDList, ant.IDAddChannelID:
 		if len(m.Data) < 1 {
 			return
 		}

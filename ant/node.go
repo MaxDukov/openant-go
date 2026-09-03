@@ -74,6 +74,27 @@ var maxReconnectAttempts = 0
 // P2-16); real ANT-FS transfers stay well below this.
 const maxBurstBytes = 1 << 20 // 1 MiB
 
+// Metrics is a snapshot of the drop/error counters instrumented by Core
+// (openant issues #6/#111 "missed readings"): they tell apart a noisy USB
+// link (bad frames, read errors) from application-level data loss (dropped
+// burst transfers, failed writes, stick reconnects).
+type Metrics struct {
+	// BadFrames counts bytes/frames dropped during stream resynchronisation
+	// (bad sync byte or checksum): a symptom of USB noise or a wedged host
+	// controller.
+	BadFrames uint64
+	// BurstDropped counts burst transfers discarded because they exceeded
+	// maxBurstBytes (misbehaving peer or a stalled reader).
+	BurstDropped uint64
+	// ReadErrors counts driver read failures (excluding timeouts); with a
+	// driver factory configured every one of them triggers a reconnect.
+	ReadErrors uint64
+	// WriteErrors counts failed writes to the driver.
+	WriteErrors uint64
+	// Reconnects counts completed re-open cycles.
+	Reconnects uint64
+}
+
 // Core is the low-level ANT engine: it reads frames from a Driver,
 // reassembles burst transfers, classifies messages into events, and
 // schedules acknowledged/burst transmission in the channel timeslot. It is
@@ -93,6 +114,14 @@ type Core struct {
 	// every successful driver swap so the reader can drop stale state.
 	reconnecting atomic.Bool
 	gen          atomic.Uint32
+
+	// Drop/error counters (see Metrics). Updated from the reader and
+	// reconnect goroutines, read from anywhere.
+	mBadFrames    atomic.Uint64
+	mBurstDropped atomic.Uint64
+	mReadErrors   atomic.Uint64
+	mWriteErrors  atomic.Uint64
+	mReconnects   atomic.Uint64
 
 	events chan Event
 
@@ -201,6 +230,10 @@ func (c *Core) currentDriver() Driver {
 	return nil
 }
 
+// Driver returns the active driver, e.g. to configure driver-specific
+// behaviour (see SetDriverReadTimeout).
+func (c *Core) Driver() Driver { return c.currentDriver() }
+
 func (c *Core) reader() {
 	defer c.wg.Done()
 	buf := make([]byte, 0, readBufferSize*2)
@@ -226,6 +259,7 @@ func (c *Core) reader() {
 			if err == ErrTimeout {
 				continue // timeout is the normal poll tick
 			}
+			c.mReadErrors.Add(1)
 			// Fatal driver failure (stick unplugged, USB pipe/IO error,
 			// serial port gone): with a driver factory configured, hand
 			// over to the reconnect supervisor. It swaps the driver and
@@ -301,6 +335,7 @@ func (c *Core) reconnectLoop(cause error) {
 		} else {
 			c.driver.Store(&driverRef{d: nd})
 			c.gen.Add(1) // reader drops stale state on the next frame
+			c.mReconnects.Add(1)
 			c.ResetSystem()
 			time.Sleep(resetWait)
 			if c.hook != nil {
@@ -337,10 +372,12 @@ func (c *Core) consume(buf []byte) []byte {
 				return buf
 			case errors.Is(err, ErrBadSync):
 				c.log.Debug("resync: bad sync byte")
+				c.mBadFrames.Add(1)
 				buf = buf[1:]
 				continue
 			default:
 				c.log.Debug("resync: dropping bad frame", "error", err, "bytes", n)
+				c.mBadFrames.Add(1)
 				buf = buf[n:]
 				continue
 			}
@@ -400,6 +437,7 @@ func (c *Core) dispatch(m *Message) {
 			// last-sequence flag forever; cap the buffer (code review
 			// PR #1, P2-16).
 			c.log.Warn("burst exceeds limit, dropping transfer", "bytes", len(c.burst), "limit", maxBurstBytes)
+			c.mBurstDropped.Add(1)
 			c.burst = c.burst[:0]
 			return
 		}
@@ -512,10 +550,23 @@ func (c *Core) writeLocked(m *Message) error {
 		return ErrDriverClosed
 	}
 	if _, err := d.Write(frame); err != nil {
+		c.mWriteErrors.Add(1)
 		c.log.Warn("driver write", "id", m.ID.String(), "error", err)
 		return err
 	}
 	return nil
+}
+
+// Metrics returns a snapshot of the drop/error counters (openant issues
+// #6/#111).
+func (c *Core) Metrics() Metrics {
+	return Metrics{
+		BadFrames:    c.mBadFrames.Load(),
+		BurstDropped: c.mBurstDropped.Load(),
+		ReadErrors:   c.mReadErrors.Load(),
+		WriteErrors:  c.mWriteErrors.Load(),
+		Reconnects:   c.mReconnects.Load(),
+	}
 }
 
 // ---- Configuration and control commands (fire and forget; the easy layer
@@ -598,6 +649,29 @@ func (c *Core) SetTransmitPower(power byte) {
 func (c *Core) SetSearchWaveform(ch byte, waveform []byte) {
 	data := append([]byte{ch}, waveform...)
 	_ = c.Write(NewMessage(IDSetSearchWaveform, data))
+}
+
+// SetProximitySearch limits the search radius of a searching slave channel:
+// 0 disables the proximity search (normal search), 1..255 restricts it to
+// the given number of signal bins (~dB of RX attenuation). Useful to pick
+// the closest sensor among several identical ones.
+func (c *Core) SetProximitySearch(ch, threshold byte) {
+	_ = c.Write(NewMessage(IDSetProximitySearch, []byte{ch, threshold}))
+}
+
+// SetChannelIDList switches the channel to list-based search matching: the
+// stick then only connects to the device IDs added with AddChannelID
+// (up to size entries), instead of matching the single channel id set with
+// SetChannelID.
+func (c *Core) SetChannelIDList(ch, size byte) {
+	_ = c.Write(NewMessage(IDChannelIDList, []byte{ch, size}))
+}
+
+// AddChannelID adds one entry to the channel search list (see
+// SetChannelIDList). deviceNum 0 is not allowed here; use deviceType 0 as
+// a type wildcard.
+func (c *Core) AddChannelID(ch byte, deviceNum uint16, deviceType byte) {
+	_ = c.Write(NewMessage(IDAddChannelID, []byte{ch, byte(deviceNum), byte(deviceNum >> 8), deviceType}))
 }
 
 // EnableExtendedMessages enables/disables extended (16 byte) receive messages.

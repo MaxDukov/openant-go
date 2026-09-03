@@ -48,6 +48,10 @@ type Node struct {
 
 	stopOnce sync.Once
 	stopCh   chan struct{}
+
+	// readTimeout is re-applied to every driver generation when set
+	// (openant issue #42); 0 keeps the driver default (blocking reads).
+	readTimeout time.Duration
 }
 
 // dataEvent is a received data message routed to a Channel callback.
@@ -155,6 +159,13 @@ func (n *Node) reconnectHook(attempt int, lastErr error) error {
 	if err := n.restore(); err != nil {
 		n.log.Warn("config restore after reconnect failed", "attempt", attempt, "error", err)
 		return err
+	}
+	// Re-apply the configured read timeout to the fresh driver generation.
+	n.mu.Lock()
+	d := n.readTimeout
+	n.mu.Unlock()
+	if d > 0 {
+		ant.SetDriverReadTimeout(n.Core.Driver(), d)
 	}
 	n.log.Info("ant device reconnected, configuration restored", "attempt", attempt)
 	if n.OnReconnect != nil {
@@ -411,6 +422,29 @@ func (n *Node) SetNetworkKey(network byte, key []byte) error {
 func (n *Node) SetLED(enabled bool) error {
 	n.Core.EnableLED(enabled)
 	return n.WaitForResponse(ant.IDEnableLED)
+}
+
+// SetReadTimeout bounds the driver read (openant issue #42). It applies to
+// the current driver and is re-applied automatically after a reconnect.
+// Not every driver supports timeouts; a false return means the setting was
+// ignored. A non-positive duration restores blocking reads.
+func (n *Node) SetReadTimeout(d time.Duration) bool {
+	n.mu.Lock()
+	n.readTimeout = d
+	n.mu.Unlock()
+	if n.Core == nil {
+		return false
+	}
+	return ant.SetDriverReadTimeout(n.Core.Driver(), d)
+}
+
+// Metrics returns the drop/error counters of the underlying core (openant
+// issues #6/#111).
+func (n *Node) Metrics() ant.Metrics {
+	if n.Core == nil {
+		return ant.Metrics{}
+	}
+	return n.Core.Metrics()
 }
 
 // Capabilities returns the capabilities reported by the stick (may be nil

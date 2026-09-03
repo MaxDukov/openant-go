@@ -45,7 +45,10 @@ const (
 	IDCloseChannel             MessageID = 0x4C
 	IDRequestMessage           MessageID = 0x4D
 	IDSetChannelID             MessageID = 0x51
+	IDChannelIDList            MessageID = 0x59
+	IDAddChannelID             MessageID = 0x5A
 	IDOpenRxScanMode           MessageID = 0x5B
+	IDSetProximitySearch       MessageID = 0x60
 	IDEnableExtendedMessages   MessageID = 0x66
 	IDEnableLED                MessageID = 0x68
 	IDLowPrioritySearchTimeout MessageID = 0x63
@@ -104,8 +107,14 @@ func (id MessageID) String() string {
 		return "REQUEST_MESSAGE"
 	case IDSetChannelID:
 		return "SET_CHANNEL_ID"
+	case IDChannelIDList:
+		return "SET_CHANNEL_ID_LIST"
+	case IDAddChannelID:
+		return "ADD_CHANNEL_ID_TO_LIST"
 	case IDOpenRxScanMode:
 		return "OPEN_RX_SCAN_MODE"
+	case IDSetProximitySearch:
+		return "SET_PROXIMITY_SEARCH"
 	case IDEnableExtendedMessages:
 		return "ENABLE_EXT_RX_MESGS"
 	case IDEnableLED:
