@@ -41,6 +41,20 @@ Every frame on the wire (USB bulk or serial):
 Unassigning before the close event yields `CHANNEL_IN_WRONG_STATE`
 (openant #81); `easy.Node.RemoveChannel` waits up to 1 s for the event.
 
+## Search helpers
+
+- **Proximity search** (`0x60`, `Channel.SetProximitySearch`): payload
+  `<channel> <threshold>`; 0 disables, 1..255 limits the search to the
+  given number of signal bins (~dB of attenuation). The threshold applies
+  while the channel is searching and is forgotten once connected.
+- **Channel ID list** (`0x59` + `0x5A`, `Channel.EnableChannelIDList` /
+  `AddChannelID`): `0x59 <channel> <size>` switches the channel to
+  list-based matching, then `0x5A <channel> <num LSB> <num MSB> <type>`
+  adds entries (device type 0 = wildcard). The stick then only connects
+  to the listed IDs regardless of the id set with `0x51`. Entries are
+  added only while the channel is not open. Both are replayed after a
+  reconnect together with the rest of the channel configuration.
+
 ## Networks and keys
 
 - Network 0 is public (all-zero key).
@@ -86,5 +100,5 @@ the CLI.
 |---|---|---|
 | No EVENT_TX in master mode (BLJ06.01.01, ANTUSB2) | firmware does not report TX events | identical in Python openant; `easy.Channel` starts a ticker at the channel period when `OnBroadcastTxData` is set on a transmit channel (real EVENT_TX suppresses the tick in the same slot); investigate LIB_CONFIG 0x6E |
 | `device or resource busy` on open | another process holds the interface | udev rules + single-owner usage; Open retries claim 5x200 ms |
-| USB timeouts on Raspberry Pi | host controller timing, kernel driver detach warnings | SetAutoDetach is best-effort; install `resources/42-ant-usb-sticks.rules` |
-| Serial "permission denied" | user not in `dialout`/`plugdev` | install udev rules, re-login |
+| USB timeouts on Raspberry Pi | host controller timing, kernel driver detach warnings | `ant.SetDriverReadTimeout` / `easy.Node.SetReadTimeout` bound bulk IN reads (re-applied after reconnect); SetAutoDetach failures on Linux now log the udev rules hint (`resources/42-ant-usb-sticks.rules`) |
+| Serial "permission denied" | user not in `dialout`/`plugdev` | install udev rules, re-login; open failures are wrapped in `ant.ErrPermission` with the hint |

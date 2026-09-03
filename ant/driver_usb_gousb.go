@@ -3,11 +3,13 @@
 package ant
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +24,10 @@ type usbDriver struct {
 	pid  uint16
 	want StickInfo
 
+	// readTimeout bounds every bulk IN transfer; 0 (default) blocks until
+	// data arrives (openant issue #42).
+	readTimeout time.Duration
+
 	mu     sync.Mutex
 	ctx    *gousb.Context
 	dev    *gousb.Device
@@ -30,6 +36,14 @@ type usbDriver struct {
 	in     *gousb.InEndpoint
 	out    *gousb.OutEndpoint
 	closed bool
+}
+
+// SetReadTimeout bounds every subsequent Read (ant.ReadTimeoutSetter).
+// A non-positive duration restores blocking reads.
+func (u *usbDriver) SetReadTimeout(d time.Duration) {
+	u.mu.Lock()
+	u.readTimeout = d
+	u.mu.Unlock()
 }
 
 // probeUSB reports whether a device with the given product id is attached
@@ -95,7 +109,7 @@ func openStickFor(ctx *gousb.Context, pid uint16, want StickInfo) (*gousb.Device
 			if err == nil {
 				err = ErrDriverNotFound
 			}
-			return nil, err
+			return nil, wrapUSBOpenErr(err)
 		}
 		return dev, nil
 	}
@@ -103,7 +117,7 @@ func openStickFor(ctx *gousb.Context, pid uint16, want StickInfo) (*gousb.Device
 		return desc.Vendor == gousb.ID(ANTVendorID) && desc.Product == gousb.ID(pid)
 	})
 	if err != nil && len(devs) == 0 {
-		return nil, err
+		return nil, wrapUSBOpenErr(err)
 	}
 	var found *gousb.Device
 	for _, d := range devs {
@@ -117,6 +131,18 @@ func openStickFor(ctx *gousb.Context, pid uint16, want StickInfo) (*gousb.Device
 		return nil, fmt.Errorf("usb: no ANT stick at bus %d addr %d: %w", want.Bus, want.Address, ErrDriverNotFound)
 	}
 	return found, nil
+}
+
+// wrapUSBOpenErr annotates permission errors with an actionable hint
+// (openant issue #40).
+func wrapUSBOpenErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, gousb.ErrorAccess) || strings.Contains(err.Error(), "access denied") || strings.Contains(err.Error(), "insufficient permission") {
+		return fmt.Errorf("%w: %v (install the ANT udev rules from resources/42-ant-usb-sticks.rules or add the user to the plugdev group)", ErrPermission, err)
+	}
+	return err
 }
 
 func init() {
@@ -200,13 +226,21 @@ func (u *usbDriver) Open() error {
 	dev, err := openStickFor(ctx, u.pid, u.want)
 	if err != nil {
 		ctx.Close()
-		return fmt.Errorf("usb: open 0x%04X:0x%04X: %w", ANTVendorID, u.pid, err)
+		return fmt.Errorf("usb: open 0x%04X:0x%04X: %w", ANTVendorID, u.pid, wrapUSBOpenErr(err))
 	}
 	// Best-effort kernel driver auto-detach (Linux); failures are not fatal,
 	// matching openant which only logs a warning (see openant issue #103).
 	if err := dev.SetAutoDetach(true); err != nil {
-		// Not implemented on some platforms; ignore.
-		_ = err
+		if runtime.GOOS == "linux" {
+			// On Linux this usually means missing privileges for the
+			// running user: the kernel driver (usbhid/cdc_acm) stays
+			// attached and transfers fail with "resource busy".
+			slog.Warn("usb: kernel driver detach failed; transfers may fail with 'resource busy'. Install the ANT udev rules (resources/42-ant-usb-sticks.rules) or run as root",
+				"error", err)
+		} else {
+			// Not implemented on some platforms; expected there.
+			slog.Default().Debug("usb: kernel driver auto-detach unsupported", "error", err)
+		}
 	}
 
 	// libusb reset, matching openant behaviour.
@@ -268,19 +302,33 @@ func (u *usbDriver) Close() error {
 	return nil
 }
 
-// Read performs a bulk IN transfer. It blocks until data arrives or the
-// driver is closed.
+// Read performs a bulk IN transfer. It blocks until data arrives, the
+// configured read timeout elapses (see SetReadTimeout) or the driver is
+// closed.
 func (u *usbDriver) Read(p []byte) (int, error) {
 	u.mu.Lock()
-	in, closed := u.in, u.closed
+	in, closed, timeout := u.in, u.closed, u.readTimeout
 	u.mu.Unlock()
 	if closed || in == nil {
 		return 0, ErrDriverClosed
 	}
-	n, err := in.Read(p)
+	ctx := context.Background()
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	n, err := in.ReadContext(ctx, p)
 	if err != nil {
 		if u.isClosed() || errors.Is(err, io.EOF) {
 			return 0, ErrDriverClosed
+		}
+		// Cancellation comes back as a TransferStatus from gousb; the
+		// deadline and libusb timeouts both map to the non-fatal
+		// ErrTimeout the reader loop treats as a poll tick.
+		if errors.Is(err, context.DeadlineExceeded) ||
+			err == gousb.TransferCancelled || err == gousb.TransferTimedOut {
+			return n, ErrTimeout
 		}
 		return n, fmt.Errorf("usb: read: %w", err)
 	}

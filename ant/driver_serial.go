@@ -108,6 +108,9 @@ func (s *SerialDriver) Open() error {
 	mode := &serial.Mode{BaudRate: SerialBaud}
 	p, err := serial.Open(s.path, mode)
 	if err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return fmt.Errorf("serial: open %s: %w (add the user to the dialout group or install the ANT udev rules from resources/42-ant-usb-sticks.rules)", s.path, ErrPermission)
+		}
 		return fmt.Errorf("serial: open %s: %w", s.path, err)
 	}
 	// Non-blocking style reads: the reader loop treats timeouts as ticks.

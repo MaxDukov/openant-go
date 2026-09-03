@@ -1,6 +1,7 @@
 package easy
 
 import (
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -35,8 +36,21 @@ type channelConfig struct {
 
 	waveform []byte
 
+	proximity    byte
+	hasProximity bool
+
+	idListSize byte
+	hasIDList  bool
+	idList     []channelIDEntry
+
 	opened bool
 	rxScan bool
+}
+
+// channelIDEntry is one entry of a channel search list.
+type channelIDEntry struct {
+	deviceNum  uint16
+	deviceType byte
 }
 
 // Channel is a configured ANT channel with user-settable data callbacks.
@@ -277,6 +291,53 @@ func (c *Channel) SetSearchWaveform(waveform []byte) error {
 	return nil
 }
 
+// SetProximitySearch limits the search radius of the channel: 0 disables
+// the proximity search (normal search), 1..255 restricts it to the given
+// number of signal bins (~dB of RX attenuation). Use it to auto-pick the
+// closest sensor when several identical ones are around.
+func (c *Channel) SetProximitySearch(threshold byte) error {
+	c.node.Core.SetProximitySearch(c.ID, threshold)
+	if err := c.node.WaitForResponse(ant.IDSetProximitySearch); err != nil {
+		return err
+	}
+	c.node.mu.Lock()
+	c.cfg.proximity, c.cfg.hasProximity = threshold, true
+	c.node.mu.Unlock()
+	return nil
+}
+
+// EnableChannelIDList switches the channel to list-based search matching
+// (ANT msg 0x59): the stick only connects to device IDs added with
+// AddChannelID, up to size entries. Call it before AddChannelID and before
+// the channel is opened.
+func (c *Channel) EnableChannelIDList(size byte) error {
+	c.node.Core.SetChannelIDList(c.ID, size)
+	if err := c.node.WaitForResponse(ant.IDChannelIDList); err != nil {
+		return err
+	}
+	c.node.mu.Lock()
+	c.cfg.idListSize, c.cfg.hasIDList, c.cfg.idList = size, true, nil
+	c.node.mu.Unlock()
+	return nil
+}
+
+// AddChannelID adds one entry to the channel search list (ANT msg 0x5A,
+// see EnableChannelIDList). deviceNum must be non-zero; deviceType 0 acts
+// as a type wildcard.
+func (c *Channel) AddChannelID(deviceNum uint16, deviceType byte) error {
+	if deviceNum == 0 {
+		return fmt.Errorf("easy: AddChannelID: device number 0 is not allowed in a search list (use SetID for wildcard search)")
+	}
+	c.node.Core.AddChannelID(c.ID, deviceNum, deviceType)
+	if err := c.node.WaitForResponse(ant.IDAddChannelID); err != nil {
+		return err
+	}
+	c.node.mu.Lock()
+	c.cfg.idList = append(c.cfg.idList, channelIDEntry{deviceNum: deviceNum, deviceType: deviceType})
+	c.node.mu.Unlock()
+	return nil
+}
+
 // RequestMessage requests a message about this channel and waits for it.
 func (c *Channel) RequestMessage(msgID ant.MessageID) error {
 	c.node.Core.RequestMessage(c.ID, msgID)
@@ -370,6 +431,21 @@ func (c *Channel) restore() error {
 	if cfg.waveform != nil {
 		if err := c.SetSearchWaveform(cfg.waveform); err != nil {
 			return err
+		}
+	}
+	if cfg.hasProximity {
+		if err := c.SetProximitySearch(cfg.proximity); err != nil {
+			return err
+		}
+	}
+	if cfg.hasIDList {
+		if err := c.EnableChannelIDList(cfg.idListSize); err != nil {
+			return err
+		}
+		for _, e := range cfg.idList {
+			if err := c.AddChannelID(e.deviceNum, e.deviceType); err != nil {
+				return err
+			}
 		}
 	}
 	if cfg.rxScan {

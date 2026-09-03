@@ -3,6 +3,7 @@ package easy
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -62,6 +63,15 @@ func TestNodeReconnectRestoresConfiguration(t *testing.T) {
 	if err := ch.SetRFFrequency(57); err != nil {
 		t.Fatalf("SetRFFrequency: %v", err)
 	}
+	if err := ch.SetProximitySearch(3); err != nil {
+		t.Fatalf("SetProximitySearch: %v", err)
+	}
+	if err := ch.EnableChannelIDList(2); err != nil {
+		t.Fatalf("EnableChannelIDList: %v", err)
+	}
+	if err := ch.AddChannelID(0x1234, 0x78); err != nil {
+		t.Fatalf("AddChannelID: %v", err)
+	}
 	if err := ch.Open(); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -83,8 +93,10 @@ func TestNodeReconnectRestoresConfiguration(t *testing.T) {
 	}
 
 	// The fresh stick must have received the full configuration replay,
-	// including the network key.
-	var haveAssign, haveID, havePeriod, haveRF, haveOpen, haveKey bool
+	// including the network key and search list.
+	var haveAssign, haveID, havePeriod, haveRF, haveOpen, haveKey, haveProx bool
+	var listSize byte
+	var listAdds [][]byte
 	for _, w := range newSim.Writes() {
 		msgs, _ := ant.ParseFrames(w)
 		for _, m := range msgs {
@@ -99,6 +111,16 @@ func TestNodeReconnectRestoresConfiguration(t *testing.T) {
 				haveRF = true
 			case ant.IDOpenChannel:
 				haveOpen = true
+			case ant.IDSetProximitySearch:
+				if len(m.Data) >= 2 && m.Data[1] == 3 {
+					haveProx = true
+				}
+			case ant.IDChannelIDList:
+				if len(m.Data) >= 2 {
+					listSize = m.Data[1]
+				}
+			case ant.IDAddChannelID:
+				listAdds = append(listAdds, append([]byte(nil), m.Data...))
 			case ant.IDSetNetworkKey:
 				if len(m.Data) >= 2 && m.Data[0] == 1 {
 					haveKey = true
@@ -106,13 +128,20 @@ func TestNodeReconnectRestoresConfiguration(t *testing.T) {
 			}
 		}
 	}
+	if listSize != 2 {
+		t.Errorf("channel id list size = %d, want 2", listSize)
+	}
+	if len(listAdds) != 1 || !slices.Equal(listAdds[0], []byte{0, 0x34, 0x12, 0x78}) {
+		t.Errorf("channel id list adds = %v, want [[0 34 12 78]]", listAdds)
+	}
 	for name, ok := range map[string]bool{
-		"assign channel": haveAssign,
-		"set channel id": haveID,
-		"channel period": havePeriod,
-		"rf frequency":   haveRF,
-		"open channel":   haveOpen,
-		"network key":    haveKey,
+		"assign channel":   haveAssign,
+		"set channel id":   haveID,
+		"channel period":   havePeriod,
+		"rf frequency":     haveRF,
+		"open channel":     haveOpen,
+		"network key":      haveKey,
+		"proximity search": haveProx,
 	} {
 		if !ok {
 			t.Errorf("configuration replay missing %s", name)

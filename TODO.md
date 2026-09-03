@@ -118,10 +118,15 @@ heart-rate / health sensors first.
       targets the common trainer test scenario (pages 0-4).
 
 ### Low-level ANT protocol (medium/low priority)
-- ⬜ **Proximity search (0x60)** — limit search radius in dB; useful to
-  auto-pick the closest HR belt among several.
-- ⬜ **Channel ID lists (0x59 config / 0x5A add)** — hardware filter for
-  "listen to these N device IDs" (multi-device scans without RF noise).
+- ✅ **Proximity search (0x60)** — DONE: Core.SetProximitySearch and
+  Channel.SetProximitySearch (threshold 0 disables, 1..255 signal bins);
+  replayed after reconnect; limit search radius to auto-pick the closest
+  HR belt among several.
+- ✅ **Channel ID lists (0x59 config / 0x5A add)** — DONE:
+  Core.SetChannelIDList / Core.AddChannelID and Channel.EnableChannelIDList
+  (size) / AddChannelID (device number + type wildcard), hardware filter
+  for "listen to these N device IDs" (multi-device scans without RF
+  noise); list entries replayed after reconnect.
 - ⬜ **Advanced burst config (0x6E)** — longer burst payloads; speeds up
   ANT-FS file downloads from trainers/watches up to ~4x.
 - ⬜ **Channel search sharing (0x71)** — several channels share one
@@ -206,15 +211,21 @@ heart-rate / health sensors first.
       hook so response waits work; easy.Node replays network keys and
       channel config, then fires OnReconnect. Verified on hardware
       (sysfs unbind/bind of ANTUSB2 on the Pi: restored on attempt 3).
-- ⬜ **#42/#103 USB timeouts on Raspberry Pi / kernel driver warnings** —
-      configurable read timeout, clearer log messages when the kernel
-      driver cannot be detached (needs udev rules hint).
+- ✅ **#42/#103 USB timeouts on Raspberry Pi / kernel driver warnings** —
+      DONE: usbDriver.SetReadTimeout bounds bulk IN transfers (ant.
+      SetDriverReadTimeout / easy.Node.SetReadTimeout; re-applied after
+      reconnect; 0 = blocking, the previous behaviour). Kernel driver
+      detach failures on Linux now log a warning with the udev rules hint
+      instead of being swallowed.
 - ⬜ EVENT_TX not reported by ANTUSB2 firmware BLJ06.01.01 in master mode
       (verified: openant 1.3.4 receives none either). Investigate
       CONFIG_EVENT_BUFFERING / LIB_CONFIG (0x6E) enabling of TX event
-      reporting for master channels; broadcast data itself transmits fine.
-- ⬜ **#6/#111 Missed readings** — buffer caps landed (burst 1 MiB, event
-      buffer drop-oldest); remaining: instrument drop counters/metrics.
+      reporting for master channels; broadcast data itself transmits fine
+      (easy.Channel ships an EVENT_TX fallback ticker since 0.1.1).
+- ✅ **#6/#111 Missed readings** — DONE: buffer caps (burst 1 MiB, event
+      buffer drop-oldest) plus Core.Metrics() drop/error counters (bad
+      frames, dropped bursts, read/write errors, reconnects), exposed via
+      easy.Node.Metrics().
 - ⬜ **#39 set_time on Garmin vívofit** — investigate TAI offset handling
       (`fs.SetTime` applies +35 s; may need device quirks).
 - ⬜ **#119 Timezone handling** — document/verify that all timestamps are
@@ -225,8 +236,10 @@ heart-rate / health sensors first.
       tests added, keep corpus growing.
 - ⬜ **#84/#44 BSC sensors not connecting** — document wildcard vs exact
       device id usage; verify period/transmission type quirks.
-- ⬜ **#40 serial port permission errors** — friendlier error message
-      pointing to the udev rules on Linux.
+- ✅ **#40 serial port permission errors** — DONE: USB and serial open
+      failures caused by missing permissions are wrapped in
+      ant.ErrPermission with an actionable hint (udev rules / dialout /
+      plugdev group).
 - ⬜ **#21 UploadDataCommand truncated args** — verify UploadData parsing
       against a wider set of devices.
 

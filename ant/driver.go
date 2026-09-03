@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 )
 
 // Driver communicates with an ANT USB stick (or serial port based node).
@@ -32,7 +33,32 @@ var (
 	ErrDriverClosed = errors.New("ant: driver closed")
 	// ErrTimeout signals a read timeout; it is not fatal.
 	ErrTimeout = errors.New("ant: driver read timeout")
+	// ErrPermission is returned (wrapped around the OS error) when the
+	// device cannot be opened for lack of user permissions, e.g. missing
+	// udev rules on Linux (openant issue #40).
+	ErrPermission = errors.New("ant: insufficient permissions")
 )
+
+// ReadTimeoutSetter is optionally implemented by drivers that support a
+// bounded read (openant issue #42: USB read timeouts on Raspberry Pi).
+type ReadTimeoutSetter interface {
+	// SetReadTimeout bounds every subsequent Read; 0 restores blocking
+	// reads.
+	SetReadTimeout(d time.Duration)
+}
+
+// SetDriverReadTimeout bounds the read of drivers implementing
+// ReadTimeoutSetter (the built-in USB driver does; openant issue #42). It
+// reports whether the driver supports timeouts. A non-positive timeout
+// restores blocking reads.
+func SetDriverReadTimeout(d Driver, timeout time.Duration) bool {
+	s, ok := d.(ReadTimeoutSetter)
+	if !ok {
+		return false
+	}
+	s.SetReadTimeout(timeout)
+	return true
+}
 
 // Driver priorities. Higher priority drivers are preferred when several
 // ANT sticks are attached (matching openant: USB-m before USB2 before serial).
