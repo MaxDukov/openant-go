@@ -98,12 +98,24 @@ heart-rate / health sensors first.
     spec puts them at bytes 3-4 and 5-6 respectively.
 
 ### Heart rate / health (high priority)
-- ⬜ **HRM master (sensor emulation) mode** — HR/battery TX pages 0x00-
-  0x04 on a master channel (baseDevice already has master support);
-  useful for testing FE-C trainers that receive HR from a "sensor" and
-  for simulating a belt without hardware.
-- ⬜ **HRM pages 0x05-0x07 (sport/profile settings)** — optional
-  sport type, HR zone config; rarely broadcast, low value.
+- ✅ **HRM master (sensor emulation) mode** — DONE: NewHeartRateMaster
+      creates a simulated belt per HRM spec Rev 2.1 section 5.2 (master
+      channel, period 8070, RF 57, device type 120, transmission type
+      LSN 1, random non-zero device number). SetHeartRate drives the
+      beat clock (beat time in 1/1024 s with the 63.999 s rollover,
+      beat count, previous-beat page 4 once a previous beat exists,
+      default page 0 before that); background pages 1-3 (operating
+      time, manufacturer, product info) rotate every 65th message per
+      the spec's schedule; the page change toggle bit flips every 4th
+      message; pages 6 (capabilities) and 7 (battery status) are served
+      on display page requests (common page 70). Useful for testing
+      FE-C trainers that receive HR from a sensor.
+- ✅ **HRM pages 0x05-0x07** — DONE (display side): page 5 swim interval
+      summary decoding added (interval avg/max, session avg; 0x00
+      invalid), pages 6/7 were already covered; page 3 product info
+      (hw/sw version, model) decoding added too. TX of pages 5-7
+      omitted deliberately: they are rarely broadcast and the emulator
+      targets the common trainer test scenario (pages 0-4).
 
 ### Low-level ANT protocol (medium/low priority)
 - ⬜ **Proximity search (0x60)** — limit search radius in dB; useful to

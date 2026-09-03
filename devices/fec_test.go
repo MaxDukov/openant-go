@@ -195,3 +195,150 @@ func TestFETrainerTorque(t *testing.T) {
 		t.Fatalf("torque math: %+v", d)
 	}
 }
+
+// Heart rate master TX schedule per ANT+ HRM spec Rev 2.1: main page 4
+// with beats, background pages 1-3 every 65th message, toggle bit every
+// 4th message.
+func TestHeartRateMasterTX(t *testing.T) {
+	n, _ := newTestNode(t)
+	h, err := NewHeartRateMaster(n, 0)
+	if err != nil {
+		t.Fatalf("NewHeartRateMaster: %v", err)
+	}
+	// Close the channel to stop the real-time EVENT_TX fallback so the
+	// beat clock is only driven by the direct txPage calls below.
+	if err := h.Channel().Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if h.DeviceID == 0 || h.DeviceID > 65535 {
+		t.Fatalf("random device id out of range: %d", h.DeviceID)
+	}
+	if h.TransType != 1 {
+		t.Fatalf("transmission type = %d, want 1 (LSN)", h.TransType)
+	}
+	if err := h.SetHeartRate(256); err == nil {
+		t.Fatal("256 bpm must be rejected")
+	}
+	h.Data.HeartRate = 0 // stop beating for the deterministic part
+
+	// Before any beat: default data page 0 with invalid heart rate.
+	t0 := time.Now()
+	h.txStart, h.lastBeat, h.prevBeat = t0, t0, t0
+	h.Data.HeartRate = 0
+	p := h.txPage(0)
+	if p[0] != 0x00 {
+		t.Fatalf("page = %02X, want 0x00", p[0])
+	}
+	if p[7] != 0 {
+		t.Fatal("invalid heart rate must be 0x00")
+	}
+
+	// 240 bpm = a beat every 250 ms.
+	h.Data.HeartRate = 240
+	h.lastBeat = time.Now().Add(-300 * time.Millisecond)
+	h.prevBeat = h.lastBeat
+	p = h.txPage(5)
+	if p[0]&0x7F != 0x04 {
+		t.Fatalf("page = %02X, want 0x04 after the first beat", p[0]&0x7F)
+	}
+	if p[6] != 1 {
+		t.Fatalf("beat count = %d, want 1", p[6])
+	}
+	if p[7] != 240 {
+		t.Fatalf("heart rate = %d, want 240", p[7])
+	}
+	prev := int(p[2]) + int(p[3])<<8
+	beat := int(p[4]) + int(p[5])<<8
+	if beat <= prev || beat == 0 {
+		t.Fatalf("beat time %d must be after previous %d", beat, prev)
+	}
+
+	// Background schedule: every 65th message, rotating pages 1-3.
+	h.Data.OperatingTime = 7200 // 2 s counts -> 3600
+	h.bgCount = 0
+	if got := h.txPage(64)[0] & 0x7F; got != 0x01 {
+		t.Fatalf("message 64 page = %02X, want 0x01", got)
+	}
+	if got := h.txPage(129)[0] & 0x7F; got != 0x02 {
+		t.Fatalf("second background page = %02X, want 0x02", got)
+	}
+	if got := h.txPage(194)[0] & 0x7F; got != 0x03 {
+		t.Fatalf("third background page = %02X, want 0x03", got)
+	}
+	bgp := h.txPage(259) // next background slot, rotation back to page 1
+	op := int(bgp[1]) + int(bgp[2])<<8 + int(bgp[3])<<16
+	if bgp[0]&0x7F != 0x01 || op != 3600 {
+		t.Fatalf("background page = %02X, operating time = %d*2 s, want 0x01/3600", bgp[0]&0x7F, op)
+	}
+
+	// Toggle bit flips every 4th message.
+	tg0, tg3 := pageToggle(0), pageToggle(3)
+	tg4, tg7 := pageToggle(4), pageToggle(7)
+	if tg0 != 0 || tg3 != 0 || tg4 == 0 || tg7 == 0 {
+		t.Fatalf("toggle: %02X %02X %02X %02X", tg0, tg3, tg4, tg7)
+	}
+}
+
+// The master answers display page requests (common page 70) for
+// capabilities (6) and battery status (7).
+func TestHeartRateMasterAck(t *testing.T) {
+	n, _ := newTestNode(t)
+	h, err := NewHeartRateMaster(n, 12345)
+	if err != nil {
+		t.Fatalf("NewHeartRateMaster: %v", err)
+	}
+	h.Channel().Close() // stop the EVENT_TX fallback ticker
+	h.Data.FeaturesSupported = 0x07
+	h.Data.FeaturesEnabled = 0x01
+	p := h.ackPage([]byte{0x46, 0x06, 0, 0, 0, 0, 0, 0})
+	if p == nil || p[0]&0x7F != 0x06 || p[2] != 0x07 || p[3] != 0x01 {
+		t.Fatalf("capabilities ack: % X", p)
+	}
+
+	h.Data.BatteryPercentage = 85
+	h.Common.LastBattery.VoltageFractional = 0.5
+	h.Common.LastBattery.VoltageCoarse = 3
+	h.Common.LastBattery.Status = BatteryStatusGood
+	p = h.ackPage([]byte{0x46, 0x07, 0, 0, 0, 0, 0, 0})
+	if p == nil || p[0]&0x7F != 0x07 || p[1] != 85 || p[2] != 128 {
+		t.Fatalf("battery ack: % X", p)
+	}
+	desc := int(p[3])
+	if desc&0x0F != 3 || (desc>>4)&0x07 != int(BatteryStatusGood) {
+		t.Fatalf("battery descriptor %02X", desc)
+	}
+	if p := h.ackPage([]byte{0x46, 0x42, 0, 0, 0, 0, 0, 0}); p != nil {
+		t.Fatalf("unknown page must be nil, got % X", p)
+	}
+}
+
+// Display side: product info page 3 and swim interval summary page 5.
+func TestHeartRateRXPages0305(t *testing.T) {
+	n, sim := newTestNode(t)
+	h, err := NewHeartRate(n, 0, 0)
+	if err != nil {
+		t.Fatalf("NewHeartRate: %v", err)
+	}
+	ch := make(chan DeviceData, 4)
+	h.OnDeviceData = func(page int, name string, data DeviceData) {
+		ch <- data
+	}
+
+	sim.EmitBroadcast(0, []byte{0x03, 42, 7, 200, 0xFF, 0xFF, 0xFF, 0xFF})
+	d := (<-ch).(HeartRateData)
+	if d.HwVersion != 42 || d.SwVersion != 7 || d.ModelNumber != 200 {
+		t.Fatalf("product info: %+v", d)
+	}
+
+	sim.EmitBroadcast(0, []byte{0x05, 120, 150, 110, 0xFF, 0xFF, 0xFF, 0xFF})
+	d = (<-ch).(HeartRateData)
+	if d.IntervalAverageHR != 120 || d.IntervalMaximumHR != 150 || d.SessionAverageHR != 110 {
+		t.Fatalf("swim summary: %+v", d)
+	}
+
+	sim.EmitBroadcast(0, []byte{0x05, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF})
+	d = (<-ch).(HeartRateData)
+	if d.IntervalAverageHR != -1 || d.SessionAverageHR != -1 {
+		t.Fatalf("invalid swim summary: %+v", d)
+	}
+}

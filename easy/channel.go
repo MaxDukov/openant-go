@@ -2,6 +2,8 @@ package easy
 
 import (
 	"log/slog"
+	"sync"
+	"time"
 
 	"github.com/maxdukov/openant-go/ant"
 )
@@ -58,6 +60,15 @@ type Channel struct {
 	// OnBroadcastTxData is called after broadcast data has been sent
 	// (channel EVENT_TX).
 	OnBroadcastTxData func(data []byte)
+
+	// TX scheduler: some firmwares (e.g. ANTUSB2 BLJ06.01.01) never
+	// report EVENT_TX for master channels. When OnBroadcastTxData is set
+	// on a transmit channel, Open starts a ticker firing it at the
+	// channel period so master profiles transmit their pages anyway; a
+	// real EVENT_TX suppresses the ticker tick in the same slot.
+	txMu   sync.Mutex
+	txLast time.Time
+	txStop chan struct{}
 }
 
 func (c *Channel) logger() *slog.Logger {
@@ -100,7 +111,8 @@ func (c *Channel) Unassign() error {
 	return nil
 }
 
-// Open opens the channel.
+// Open opens the channel. Transmit channels with OnBroadcastTxData set
+// additionally start the EVENT_TX fallback ticker (see the field docs).
 func (c *Channel) Open() error {
 	c.node.Core.OpenChannel(c.ID)
 	if err := c.node.WaitForResponse(ant.IDOpenChannel); err != nil {
@@ -108,7 +120,15 @@ func (c *Channel) Open() error {
 	}
 	c.node.mu.Lock()
 	c.cfg.opened, c.cfg.rxScan = true, false
+	transmit := c.cfg.ctype == ChannelBidirectionalTransmit || c.cfg.ctype == ChannelSharedBidirectionalTransmit
+	period := int(c.cfg.period)
+	if period == 0 {
+		period = 8192 // ANT default channel period
+	}
 	c.node.mu.Unlock()
+	if transmit && c.OnBroadcastTxData != nil {
+		c.startTxTicker(time.Duration(period) * time.Second / 32768)
+	}
 	return nil
 }
 
@@ -126,6 +146,7 @@ func (c *Channel) OpenRxScanMode() error {
 
 // Close closes the channel.
 func (c *Channel) Close() error {
+	c.stopTxTicker()
 	c.node.Core.CloseChannel(c.ID)
 	if err := c.node.WaitForResponse(ant.IDCloseChannel); err != nil {
 		return err
@@ -134,6 +155,52 @@ func (c *Channel) Close() error {
 	c.cfg.opened, c.cfg.rxScan = false, false
 	c.node.mu.Unlock()
 	return nil
+}
+
+// startTxTicker fires OnBroadcastTxData at the channel period when the
+// stick never reports EVENT_TX.
+func (c *Channel) startTxTicker(interval time.Duration) {
+	c.stopTxTicker()
+	c.txStop = make(chan struct{})
+	stop := c.txStop
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-t.C:
+				c.txMu.Lock()
+				// A real EVENT_TX already fired in this slot.
+				if time.Since(c.txLast) < interval*3/4 {
+					c.txMu.Unlock()
+					continue
+				}
+				c.txLast = time.Now()
+				callback := c.OnBroadcastTxData
+				c.txMu.Unlock()
+				if callback != nil {
+					callback(nil)
+				}
+			}
+		}
+	}()
+}
+
+// stopTxTicker stops the EVENT_TX fallback ticker, if any.
+func (c *Channel) stopTxTicker() {
+	if c.txStop != nil {
+		close(c.txStop)
+		c.txStop = nil
+	}
+}
+
+// noteTx records a real EVENT_TX so the fallback ticker skips the slot.
+func (c *Channel) noteTx() {
+	c.txMu.Lock()
+	c.txLast = time.Now()
+	c.txMu.Unlock()
 }
 
 // SetID sets the channel id: device number (0 = any), device type and

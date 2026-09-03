@@ -1,6 +1,7 @@
 package easy
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -52,4 +53,29 @@ func TestTwoNodesParallel(t *testing.T) {
 	sim1.EmitBroadcast(0, []byte{0x11, 1, 2, 3, 4, 5, 6, 7})
 	sim2.EmitBroadcast(0, []byte{0x22, 1, 2, 3, 4, 5, 6, 7})
 	time.Sleep(200 * time.Millisecond) // let the dispatcher settle
+}
+
+// TestTxTickerFallback: firmwares that never report EVENT_TX for master
+// channels (e.g. ANTUSB2 BLJ06.01.01) still need the profile's pages to
+// go out, so Open starts a ticker at the channel period.
+func TestTxTickerFallback(t *testing.T) {
+	n, _ := newTestNode(t)
+	ch, err := n.NewChannel(ChannelBidirectionalTransmit, 0x00, nil)
+	if err != nil {
+		t.Fatalf("NewChannel: %v", err)
+	}
+	var cnt atomic.Int32
+	ch.OnBroadcastTxData = func([]byte) { cnt.Add(1) }
+	if err := ch.Open(); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer ch.Close()
+	// Default period 8192/32768 = 250 ms; wait for at least two ticks.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && cnt.Load() < 2 {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if cnt.Load() < 2 {
+		t.Fatalf("tx ticker fired %d times in 3 s, want >= 2", cnt.Load())
+	}
 }

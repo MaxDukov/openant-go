@@ -507,6 +507,7 @@ func (n *Node) dispatch(ch *Channel, de dataEvent) {
 			ch.OnAcknowledgedData(de.data)
 		}
 	case ant.EventTx:
+		ch.noteTx()
 		if ch.OnBroadcastTxData != nil {
 			ch.OnBroadcastTxData(de.data)
 		}

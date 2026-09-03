@@ -31,6 +31,11 @@
 //	    // sensor with that ID never showed up
 //	}
 //
+// Some profiles can also act as the sensor: NewHeartRateMaster emulates
+// an ANT+ heart rate belt (set the bpm with SetHeartRate), and
+// NewFitnessEquipment exposes a controllable trainer interface
+// (SetTargetPower, SetTrackResistance, SetUserConfig, workouts).
+//
 // # Scanner
 //
 // [Scanner] listens on all device types at once ([NewScanner]) and reports

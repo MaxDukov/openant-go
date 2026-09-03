@@ -271,11 +271,12 @@ type baseDevice struct {
 	Batteries [15]BatteryData
 
 	// Virtual hooks (replace Python method overriding).
-	onProfileData func(data []byte)        // profile page parsing
-	onProfileTX   func() []byte            // master: profile TX page
-	onProfileAck  func(data []byte) []byte // master: profile ACK reply
-	onBatteryLog  func(b BatteryData)      // battery handling override
-	onDataFull    func(data []byte)        // full data handler override (Scanner)
+	onProfileData   func(data []byte)        // profile page parsing
+	onProfileTX     func() []byte            // master: profile TX page
+	onProfileTXFull func(count int) []byte   // master: full page scheduler override
+	onProfileAck    func(data []byte) []byte // master: profile ACK reply
+	onBatteryLog    func(b BatteryData)      // battery handling override
+	onDataFull      func(data []byte)        // full data handler override (Scanner)
 
 	// User callbacks.
 	OnDeviceData func(page int, pageName string, data DeviceData)
@@ -534,10 +535,15 @@ func (d *baseDevice) onBattery(b BatteryData) {
 	}
 }
 
-// onTXData sends pages on the EVENT_TX interval (master mode).
+// onTXData sends pages on the EVENT_TX interval (master mode). A profile
+// with onProfileTXFull takes over the whole page schedule (including the
+// common pages), e.g. the HRM sends its own background pages instead of
+// common 80/81.
 func (d *baseDevice) onTXData(_ []byte) {
 	var payload []byte
 	switch {
+	case d.onProfileTXFull != nil:
+		payload = d.onProfileTXFull(d.pageCount)
 	case d.pageCount == 0:
 		payload = d.Common.ManufacturerPagePayload()
 	case d.pageCount == 65:
