@@ -297,8 +297,15 @@ heart-rate / health sensors first.
       - `CreateFile` command pipe parsing (openant crashes on it),
       - `shift` page 0x03 out-of-bounds read,
       - `controls_device` 0x47 reply payload assembly.
-- ⬜ Continuous fuzzing in CI (longer budgets, corpus caching).
-- ⬜ Benchmarks for the reader loop and page decoders.
+- ✅ Continuous fuzzing in CI — DONE: the fuzz workflow (.github/workflows/fuzz.yml)
+      runs every parser target on pull requests (15 s smoke budget per
+      target) and nightly (3 min per target, matrix-parallel), caches the
+      incremental corpora (Go build-cache fuzz directory) between runs
+      and uploads failing inputs as artifacts.
+- ✅ Benchmarks — DONE: ant (ParseFrame, ParseFramesStream, Core.consume
+      broadcast and burst reassembly), devices (HRM/BSC page decoders,
+      common pages, InfluxFields), fs (beacon, command dispatcher,
+      directory). Run with `make bench` (adds -benchtime=1s).
 - ✅ GitHub Actions CI (ubuntu): gofmt, vet, staticcheck 2025.1.1,
       `go test -race`, build examples+CLI; branch protection requires the
       "test" check on PRs (macOS dropped — not a target architecture).

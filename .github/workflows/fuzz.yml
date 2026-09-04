@@ -1,0 +1,62 @@
+# Continuous fuzzing for the parsers that consume device-controlled
+# input. Pull requests get a short smoke run per target; the nightly
+# scheduled run gives every target a bigger budget. Failing inputs land
+# in testdata/fuzz and are uploaded as artifacts; incremental corpora in
+# the Go build cache are kept between runs via actions/cache.
+name: Fuzz
+
+on:
+  pull_request:
+  schedule:
+    - cron: "0 3 * * *" # daily, after the morning CI window
+  workflow_dispatch:
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { package: ./ant, target: FuzzParseFrame }
+          - { package: ./fs, target: FuzzParseBeacon }
+          - { package: ./fs, target: FuzzParseCommand }
+          - { package: ./fs, target: FuzzParsePipeCommand }
+          - { package: ./fs, target: FuzzParseDirectory }
+          - { package: ./fs, target: FuzzApplicationOnData }
+          - { package: ./devices, target: FuzzBaseDeviceOnData }
+          - { package: ./devices, target: FuzzScannerScanData }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install libusb
+        run: sudo apt-get update && sudo apt-get install -y libusb-1.0-0-dev pkg-config
+
+      - name: Restore fuzz corpus
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/go-build/fuzz
+          key: fuzz-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-${{ matrix.target }}-
+
+      # Smoke budget on pull requests, longer budget on scheduled runs.
+      - name: Fuzz ${{ matrix.target }}
+        if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+        run: go test -run '^${{ matrix.target }}$' -fuzz '^${{ matrix.target }}$' -fuzztime 15s ${{ matrix.package }}
+
+      - name: Fuzz ${{ matrix.target }} (extended)
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: go test -run '^${{ matrix.target }}$' -fuzz '^${{ matrix.target }}$' -fuzztime 3m ${{ matrix.package }}
+
+      - name: Upload failing inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-failures-${{ matrix.target }}
+          path: "**/testdata/fuzz"
+          if-no-files-found: ignore
