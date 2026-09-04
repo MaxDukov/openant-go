@@ -72,6 +72,15 @@ func TestNodeReconnectRestoresConfiguration(t *testing.T) {
 	if err := ch.AddChannelID(0x1234, 0x78); err != nil {
 		t.Fatalf("AddChannelID: %v", err)
 	}
+	if err := ch.SetSearchSharing(4); err != nil {
+		t.Fatalf("SetSearchSharing: %v", err)
+	}
+	if err := ch.SetLIBConfig(0x01); err != nil {
+		t.Fatalf("SetLIBConfig: %v", err)
+	}
+	if err := ch.EnableAdvancedBurst(9); err != nil {
+		t.Fatalf("EnableAdvancedBurst: %v", err)
+	}
 	if err := ch.Open(); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -95,6 +104,7 @@ func TestNodeReconnectRestoresConfiguration(t *testing.T) {
 	// The fresh stick must have received the full configuration replay,
 	// including the network key and search list.
 	var haveAssign, haveID, havePeriod, haveRF, haveOpen, haveKey, haveProx bool
+	var haveSharing, haveLib, haveAdv bool
 	var listSize byte
 	var listAdds [][]byte
 	for _, w := range newSim.Writes() {
@@ -111,7 +121,7 @@ func TestNodeReconnectRestoresConfiguration(t *testing.T) {
 				haveRF = true
 			case ant.IDOpenChannel:
 				haveOpen = true
-			case ant.IDSetProximitySearch:
+			case ant.IDSetProximitySearchLegacy:
 				if len(m.Data) >= 2 && m.Data[1] == 3 {
 					haveProx = true
 				}
@@ -124,6 +134,19 @@ func TestNodeReconnectRestoresConfiguration(t *testing.T) {
 			case ant.IDSetNetworkKey:
 				if len(m.Data) >= 2 && m.Data[0] == 1 {
 					haveKey = true
+				}
+			case ant.IDChannelSearchSharingLegacy:
+				if len(m.Data) >= 2 && m.Data[1] == 4 {
+					haveSharing = true
+				}
+			case ant.IDLIBConfigLegacy:
+				if len(m.Data) >= 2 && m.Data[1] == 0x01 {
+					haveLib = true
+				}
+			case ant.IDConfigAdvancedBurstLegacy:
+				// Rev 5.1 payload: [filler][enable][packet enum][features...].
+				if slices.Equal(m.Data, []byte{0x00, 1, 2, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}) {
+					haveAdv = true
 				}
 			}
 		}
@@ -142,6 +165,9 @@ func TestNodeReconnectRestoresConfiguration(t *testing.T) {
 		"open channel":     haveOpen,
 		"network key":      haveKey,
 		"proximity search": haveProx,
+		"search sharing":   haveSharing,
+		"lib config":       haveLib,
+		"advanced burst":   haveAdv,
 	} {
 		if !ok {
 			t.Errorf("configuration replay missing %s", name)

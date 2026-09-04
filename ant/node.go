@@ -74,6 +74,11 @@ var maxReconnectAttempts = 0
 // P2-16); real ANT-FS transfers stay well below this.
 const maxBurstBytes = 1 << 20 // 1 MiB
 
+// defaultAdvBurstMax is the assumed advanced burst packet size (payload
+// bytes per EXTENDED_BURST_DATA packet) when 0 was configured (stick
+// default) or when receiving packets without a local configuration.
+const defaultAdvBurstMax = 24
+
 // Metrics is a snapshot of the drop/error counters instrumented by Core
 // (openant issues #6/#111 "missed readings"): they tell apart a noisy USB
 // link (bad frames, read errors) from application-level data loss (dropped
@@ -130,9 +135,29 @@ type Core struct {
 	txMu    sync.Mutex
 	txQueue []*Message
 
+	// protoLegacy selects the Rev 5.1 (nRF24AP2/ANTUSB2-era) spellings of
+	// the messages whose ids changed in later protocol revisions
+	// (proximity search, LIB config, search sharing, advanced burst).
+	// It is set once at start-up (see DetectProtocol) and read from the
+	// send paths.
+	protoLegacy atomic.Bool
+
+	// detectCh, when non-nil, receives every raw SERIAL_NUMBER-class
+	// response for DetectProtocol. Guarded by detectMu.
+	detectMu sync.Mutex
+	detectCh chan []byte
+
+	// Advanced burst packet size configured with SetAdvancedBurst
+	// (0 = not configured, sender/receiver uses defaultAdvBurstMax).
+	advBurstMax atomic.Uint32
+
 	// Reader-goroutine local state (no locking required).
 	burst    []byte
 	lastData []byte
+
+	// Advanced burst reassembly state (reader goroutine only).
+	advActive  bool
+	advLastSeq byte
 
 	running atomic.Bool
 	stopCh  chan struct{}
@@ -295,6 +320,7 @@ func (c *Core) reader() {
 			buf = buf[:0]
 			c.burst = c.burst[:0]
 			c.lastData = nil
+			c.advActive = false
 			myGen = g
 		}
 		buf = append(buf, chunk[:n]...)
@@ -430,6 +456,7 @@ func (c *Core) dispatch(m *Message) {
 		if seq == 0 {
 			// Start of a new burst transfer.
 			c.burst = c.burst[:0]
+			c.advActive = false
 		}
 		c.burst = append(c.burst, m.Data[1:]...)
 		if len(c.burst) > maxBurstBytes {
@@ -445,6 +472,60 @@ func (c *Core) dispatch(m *Message) {
 			// Last packet of the burst.
 			c.emit(Event{Kind: KindChannel, Channel: channel, Code: EventRxBurstPacket, Data: cloneBytes(c.burst)})
 			c.burst = c.burst[:0]
+		}
+
+	case IDExtendedBurstData: // advanced burst (Config Advanced Burst 0x61)
+		if len(m.Data) < 2 {
+			return
+		}
+		flags := m.Data[1]
+		payload := m.Data[2:]
+		if flags&0x80 != 0 {
+			c.log.Debug("advanced burst packet carries extended data (not decoded)")
+		}
+		seq := flags & 0x7F
+		maxPkt := int(c.advBurstMax.Load())
+		if maxPkt == 0 {
+			maxPkt = defaultAdvBurstMax
+		}
+		if !c.advActive {
+			if seq != 0 {
+				c.log.Debug("advanced burst packet without start, dropping", "seq", seq)
+				return
+			}
+			c.advActive, c.advLastSeq = true, 0
+			c.burst = c.burst[:0]
+		} else if want := (c.advLastSeq + 1) & 0x7F; seq == want {
+			// Continue the transfer (this includes the 127 -> 0 wrap).
+			c.advLastSeq = seq
+		} else if seq == 0 {
+			// Sequence restarts at 0 mid-transfer: the peer began a new
+			// burst without completing the previous one; start over.
+			c.burst = c.burst[:0]
+			c.advLastSeq = 0
+		} else {
+			c.log.Warn("advanced burst sequence mismatch, dropping transfer", "seq", seq, "want", want)
+			c.mBurstDropped.Add(1)
+			c.advActive = false
+			c.burst = c.burst[:0]
+			return
+		}
+		c.burst = append(c.burst, payload...)
+		if len(c.burst) > maxBurstBytes {
+			c.log.Warn("advanced burst exceeds limit, dropping transfer", "bytes", len(c.burst), "limit", maxBurstBytes)
+			c.mBurstDropped.Add(1)
+			c.burst = c.burst[:0]
+			c.advActive = false
+			return
+		}
+		if len(payload) < maxPkt {
+			// A packet shorter than the configured maximum terminates the
+			// transfer (senders emit an empty packet when the payload is an
+			// exact multiple of the packet size).
+			channel := m.Data[0]
+			c.emit(Event{Kind: KindChannel, Channel: channel, Code: EventRxBurstPacket, Data: cloneBytes(c.burst)})
+			c.burst = c.burst[:0]
+			c.advActive = false
 		}
 
 	case IDChannelEvent: // 0x40
@@ -466,8 +547,20 @@ func (c *Core) dispatch(m *Message) {
 		c.emit(Event{Kind: KindResponse, Channel: m.Data[0], Code: Code(m.ID), Data: cloneBytes(m.Data[1:])})
 
 	case IDUnassignChannel, IDCloseChannel, IDEnableExtendedMessages,
-		IDAntVersion, IDCapabilities, IDSerialNumber, IDStartupMessage, IDSerialError:
+		IDAntVersion, IDCapabilities, IDSerialNumber, IDSerialNumberNew,
+		IDStartupMessage, IDSerialError:
 		c.emit(Event{Kind: KindResponse, Code: Code(m.ID), Data: cloneBytes(m.Data)})
+		if (m.ID == IDSerialNumber || m.ID == IDSerialNumberNew) && len(m.Data) <= 8 {
+			c.detectMu.Lock()
+			ch := c.detectCh
+			c.detectMu.Unlock()
+			if ch != nil {
+				select {
+				case ch <- m.Data:
+				default:
+				}
+			}
+		}
 
 	default:
 		c.log.Debug("unhandled message", "id", m.ID.String(), "data", m.Data)
@@ -497,8 +590,8 @@ func (c *Core) dispatcher() {
 
 // drainTimeslot sends queued messages in the channel timeslot triggered by
 // a received broadcast message. Non-burst messages are sent one per
-// timeslot; burst transfers continue until the last packet flag, matching
-// openant exactly.
+// timeslot; burst transfers (classic and advanced) continue until the last
+// packet, matching openant exactly.
 func (c *Core) drainTimeslot() {
 	c.txMu.Lock()
 	defer c.txMu.Unlock()
@@ -506,7 +599,21 @@ func (c *Core) drainTimeslot() {
 		m := c.txQueue[0]
 		c.txQueue = c.txQueue[1:]
 		c.write(m)
-		last := m.ID != IDBurstTransferData || (len(m.Data) > 0 && m.Data[0]&0x80 != 0)
+		var last bool
+		switch m.ID {
+		case IDBurstTransferData:
+			last = len(m.Data) > 0 && m.Data[0]&0x80 != 0
+		case IDExtendedBurstData:
+			// A packet shorter than the maximum terminates an advanced
+			// burst (the send side appends an empty packet when needed).
+			maxPkt := int(c.advBurstMax.Load())
+			if maxPkt == 0 {
+				maxPkt = defaultAdvBurstMax
+			}
+			last = len(m.Data)-2 < maxPkt
+		default:
+			last = true
+		}
 		if last {
 			break
 		}
@@ -655,8 +762,15 @@ func (c *Core) SetSearchWaveform(ch byte, waveform []byte) {
 // 0 disables the proximity search (normal search), 1..255 restricts it to
 // the given number of signal bins (~dB of RX attenuation). Useful to pick
 // the closest sensor among several identical ones.
+//
+// The message id depends on the protocol revision (0x60 modern,
+// 0x71 Rev 5.1); see SetProtocolLegacy / DetectProtocol.
 func (c *Core) SetProximitySearch(ch, threshold byte) {
-	_ = c.Write(NewMessage(IDSetProximitySearch, []byte{ch, threshold}))
+	id := IDSetProximitySearch
+	if c.protoLegacy.Load() {
+		id = IDSetProximitySearchLegacy
+	}
+	_ = c.Write(NewMessage(id, []byte{ch, threshold}))
 }
 
 // SetChannelIDList switches the channel to list-based search matching: the
@@ -672,6 +786,147 @@ func (c *Core) SetChannelIDList(ch, size byte) {
 // a type wildcard.
 func (c *Core) AddChannelID(ch byte, deviceNum uint16, deviceType byte) {
 	_ = c.Write(NewMessage(IDAddChannelID, []byte{ch, byte(deviceNum), byte(deviceNum >> 8), deviceType}))
+}
+
+// SetSearchSharing makes several channels share one search: the shared
+// search runs every cyclesPerSearch channel periods on each channel in
+// turn, saving bandwidth and battery when many slave channels search
+// simultaneously. 0 disables search sharing.
+//
+// The message id depends on the protocol revision (0x53 modern,
+// 0x81 Rev 5.1); see SetProtocolLegacy / DetectProtocol.
+func (c *Core) SetSearchSharing(ch, cyclesPerSearch byte) {
+	id := IDChannelSearchSharing
+	if c.protoLegacy.Load() {
+		id = IDChannelSearchSharingLegacy
+	}
+	_ = c.Write(NewMessage(id, []byte{ch, cyclesPerSearch}))
+}
+
+// LIBConfig flag bits for SetLIBConfig: they select what is appended to
+// extended RX data messages (identical in both protocol revisions).
+const (
+	LIBConfigRxTimestamp byte = 0x20
+	LIBConfigRSSI        byte = 0x40
+	LIBConfigChannelID   byte = 0x80
+)
+
+// SetLIBConfig sets the library configuration: the flag bits
+// (LIBConfigRxTimestamp, LIBConfigRSSI, LIBConfigChannelID) select which
+// extended data (timestamp, RSSI, channel ID) is appended to received
+// data messages.
+//
+// The message id depends on the protocol revision (0x71 modern,
+// 0x6E Rev 5.1); see SetProtocolLegacy / DetectProtocol.
+func (c *Core) SetLIBConfig(ch, config byte) {
+	id := IDLIBConfig
+	if c.protoLegacy.Load() {
+		id = IDLIBConfigLegacy
+	}
+	_ = c.Write(NewMessage(id, []byte{ch, config}))
+}
+
+// SetProtocolLegacy forces the Rev 5.1 message spellings (nRF24AP2 /
+// ANTUSB2-era devices: proximity search 0x71, LIB config 0x6E, search
+// sharing 0x81, advanced burst config 0x78). Modern firmware uses 0x60 /
+// 0x71 / 0x53 / 0x61 respectively. DetectProtocol chooses automatically.
+func (c *Core) SetProtocolLegacy(legacy bool) {
+	c.protoLegacy.Store(legacy)
+}
+
+// ProtocolLegacy reports whether Rev 5.1 message spellings are in use.
+func (c *Core) ProtocolLegacy() bool { return c.protoLegacy.Load() }
+
+// DetectProtocol auto-detects the protocol revision of the stick: legacy
+// (Rev 5.1) firmware answers a serial number request (0x61) with the
+// 4-byte serial number, while modern firmware either answers with the
+// 3-byte advanced burst configuration or does not implement that request
+// at all (in which case a 0x3F serial request is tried). It returns true
+// when the stick uses the Rev 5.1 spellings. Call it once right after
+// NewCore, before any channels are configured; easy.New does this
+// automatically.
+func (c *Core) DetectProtocol(timeout time.Duration) bool {
+	ch := make(chan []byte, 4)
+	c.detectMu.Lock()
+	c.detectCh = ch
+	c.detectMu.Unlock()
+	defer func() {
+		c.detectMu.Lock()
+		c.detectCh = nil
+		c.detectMu.Unlock()
+	}()
+
+	_ = c.Write(NewMessage(IDRequestMessage, []byte{0x00, byte(IDSerialNumber)}))
+	select {
+	case data := <-ch:
+		// 4 bytes = serial number (Rev 5.1); 3 bytes = the modern
+		// firmware reporting its advanced burst configuration.
+		c.protoLegacy.Store(len(data) == 4)
+		return c.protoLegacy.Load()
+	case <-time.After(timeout):
+		// No answer at 0x61: try the modern serial number request.
+		_ = c.Write(NewMessage(IDRequestMessage, []byte{0x00, byte(IDSerialNumberNew)}))
+		select {
+		case <-ch:
+			c.protoLegacy.Store(false)
+			return false
+		case <-time.After(timeout):
+			// Undetectable; keep the modern default.
+			return c.protoLegacy.Load()
+		}
+	}
+}
+
+// SetAdvancedBurst enables or disables advanced burst transfers on the
+// node with maxPacketSize payload bytes per packet. maxPacketSize is
+// rounded to what the device supports: modern firmware accepts any size
+// up to 24 bytes, Rev 5.1 devices support 8, 16 or 24 bytes only (0 = the
+// 24 byte maximum in both cases). When enabled, data can be sent with
+// SendAdvancedBurst and received transfers are reassembled into regular
+// burst events.
+//
+// The configuration message id depends on the protocol revision (0x61
+// modern, 0x78 Rev 5.1); see SetProtocolLegacy / DetectProtocol.
+func (c *Core) SetAdvancedBurst(enabled bool, maxPacketSize uint16) error {
+	if maxPacketSize > 24 {
+		return fmt.Errorf("ant: advanced burst packet size %d exceeds the 24 byte maximum", maxPacketSize)
+	}
+	e := byte(0)
+	if enabled {
+		e = 1
+	}
+	var err error
+	if c.protoLegacy.Load() {
+		// Rev 5.1: [filler][enable][max packet enum][required features
+		// (3 bytes)][optional features (3 bytes)].
+		if maxPacketSize == 0 {
+			maxPacketSize = 24
+		}
+		enum := byte(1)
+		switch {
+		case maxPacketSize > 16:
+			enum = 3
+		case maxPacketSize > 8:
+			enum = 2
+		}
+		err = c.Write(NewMessage(IDConfigAdvancedBurstLegacy, []byte{
+			0x00, e, enum, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		}))
+	} else {
+		if maxPacketSize == 0 {
+			maxPacketSize = 24
+		}
+		err = c.Write(NewMessage(IDConfigAdvancedBurst, []byte{0x00, e, byte(maxPacketSize), byte(maxPacketSize >> 8)}))
+	}
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		c.advBurstMax.Store(0)
+		return nil
+	}
+	c.advBurstMax.Store(uint32(maxPacketSize))
+	return nil
 }
 
 // EnableExtendedMessages enables/disables extended (16 byte) receive messages.
@@ -736,6 +991,31 @@ func (c *Core) SendBurstTransfer(ch byte, data []byte) error {
 			seq |= 0b100 // last packet flag
 		}
 		c.SendBurstTransferPacket(ch|seq<<5, data[i*8:(i+1)*8])
+	}
+	return nil
+}
+
+// SendAdvancedBurst queues data as EXTENDED_BURST_DATA packets for
+// timeslot transmission (advanced burst must be enabled with
+// SetAdvancedBurst first; otherwise the stick default packet size is
+// assumed). A terminating short packet is appended when the payload is an
+// exact multiple of the packet size, per the ANT specification.
+func (c *Core) SendAdvancedBurst(ch byte, data []byte) error {
+	if len(data) == 0 {
+		return fmt.Errorf("ant: advanced burst payload is empty")
+	}
+	maxPkt := int(c.advBurstMax.Load())
+	if maxPkt == 0 {
+		maxPkt = defaultAdvBurstMax
+	}
+	seq := byte(0)
+	for off := 0; off < len(data); off += maxPkt {
+		end := min(off+maxPkt, len(data))
+		c.WriteTimeslot(NewMessage(IDExtendedBurstData, append([]byte{ch, seq}, data[off:end]...)))
+		seq = (seq + 1) & 0x7F
+	}
+	if len(data)%maxPkt == 0 {
+		c.WriteTimeslot(NewMessage(IDExtendedBurstData, []byte{ch, seq}))
 	}
 	return nil
 }

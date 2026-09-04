@@ -130,11 +130,29 @@ func NewWithDriver(d ant.Driver, opts ...NodeOption) (*Node, error) {
 	}
 	n.Core = core
 
+	// Detect the protocol revision (Rev 5.1 vs modern message spellings)
+	// before anything else; on Rev 5.1 devices the detection request
+	// doubles as the serial number request. Its response is ambiguous
+	// (0x61 serial number vs advanced burst config), so buffered events
+	// from the detection are discarded to not confuse later waits.
+	n.Core.DetectProtocol(250 * time.Millisecond)
+	n.responses.reset()
+	n.events.reset()
+
 	// Request capabilities and metadata eagerly, like openant's worker.
 	n.Core.RequestMessage(0, ant.IDCapabilities)
-	n.Core.RequestMessage(0, ant.IDSerialNumber)
+	n.Core.RequestMessage(0, n.serialRequestID())
 	n.Core.RequestMessage(0, ant.IDAntVersion)
 	return n, nil
+}
+
+// serialRequestID returns the message id the detected firmware answers
+// serial number requests with (0x61 on Rev 5.1 devices, 0x3F modern).
+func (n *Node) serialRequestID() ant.MessageID {
+	if n.Core.ProtocolLegacy() {
+		return ant.IDSerialNumber
+	}
+	return ant.IDSerialNumberNew
 }
 
 // NodeOption configures a Node.
@@ -207,7 +225,7 @@ func (n *Node) restore() error {
 	// Refresh stick metadata; best effort — responses fill in via the
 	// regular event path.
 	n.Core.RequestMessage(0, ant.IDCapabilities)
-	n.Core.RequestMessage(0, ant.IDSerialNumber)
+	n.Core.RequestMessage(0, n.serialRequestID())
 	n.Core.RequestMessage(0, ant.IDAntVersion)
 	return nil
 }
@@ -228,10 +246,15 @@ func (n *Node) handleEvent(ev ant.Event) {
 			} else {
 				n.log.Warn("bad capabilities payload", "error", err)
 			}
-		case ant.IDSerialNumber:
-			n.mu.Lock()
-			n.serial = ant.SerialNumber(ev.Data)
-			n.mu.Unlock()
+		case ant.IDSerialNumber, ant.IDSerialNumberNew:
+			// The modern firmware also answers a 0x61 request with the
+			// 3-byte advanced burst configuration; only a real 4-byte
+			// serial number is stored.
+			if len(ev.Data) == 4 {
+				n.mu.Lock()
+				n.serial = ant.SerialNumber(ev.Data)
+				n.mu.Unlock()
+			}
 		case ant.IDAntVersion:
 			n.mu.Lock()
 			n.antVersion = ant.AntVersion(ev.Data)
