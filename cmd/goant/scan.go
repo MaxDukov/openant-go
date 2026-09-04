@@ -17,7 +17,7 @@ import (
 	"github.com/maxdukov/openant-go/easy"
 )
 
-const version = "0.1.1"
+const version = "0.1.2"
 
 func deviceTypeName(id int) string { return devices.DeviceType(id).String() }
 

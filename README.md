@@ -10,16 +10,24 @@ ANT and ANT-FS library for Go — a port of the Python
 
 ## Features
 
-- ANT base interface (framing, USB/serial drivers, event pipeline).
+- ANT base interface (framing, USB/serial drivers, event pipeline):
+  multi-dongle support (`ant.Sticks`, selection by serial or bus:addr),
+  configurable USB read timeouts, drop/error metrics
+  (`ant.Core.Metrics`), proximity search and channel ID lists.
 - ANT-FS (command pipe, directory listings, download, upload, erase, ...).
 - ANT+ device profiles and a base type for custom ones (`devices`).
+- Device emulation (master mode): heart rate belt
+  (`devices.NewHeartRateMaster`), trainer control (FE-C target power,
+  wind/track resistance, user config, capabilities), generic broadcast
+  masters.
 - Four packages mirroring openant:
   - `ant` — basic ANT library (openant.base),
   - `easy` — blocking interface with callbacks (openant.easy),
   - `fs` — ANT-FS library (openant.fs),
   - `devices` — ANT+ profiles (openant.devices).
 - `anttest` — scriptable in-memory driver and stick simulator for tests.
-- CLI `goant` with the `scan` subcommand (influx/mqtt: see TODO.md).
+- CLI `goant` (`scan`, `sticks`, `antfs-scan`, `version`; influx/mqtt: see
+  TODO.md).
 - 14 example applications under `examples/` (ports of openant's examples).
 
 ## Requirements
@@ -37,6 +45,8 @@ ANT and ANT-FS library for Go — a port of the Python
 ```sh
 go get github.com/maxdukov/openant-go
 ```
+
+Package documentation: https://pkg.go.dev/github.com/maxdukov/openant-go
 
 ## Usage
 
@@ -61,6 +71,16 @@ defer stop()
 node.Run(ctx) // blocking dispatch loop
 ```
 
+Sensor emulation (master mode) is just as compact:
+
+```go
+hrm, err := devices.NewHeartRateMaster(node, 0 /* random device id */)
+if err != nil {
+    log.Fatal(err)
+}
+hrm.SetHeartRate(150)
+```
+
 See `examples/` for the full set (heart rate, scanner, ANT-FS listing,
 master-mode broadcast, continuous scan, trainer workouts, ...).
 
@@ -69,11 +89,20 @@ master-mode broadcast, continuous scan, trainer workouts, ...).
 ```sh
 go install github.com/maxdukov/openant-go/cmd/goant@latest
 
+goant version                  # print version
+goant sticks                   # list attached ANT sticks (serial, bus:addr)
 goant scan                     # print devices found to the terminal
-goant scan --auto_create       # also print device data pages
+goant scan -auto_create        # also print device data pages
 goant scan -t HeartRate        # search only heart rate monitors
+goant scan -i 12345            # search a specific device id
+goant scan -s <serial>         # scan on a specific stick
+goant scan -all                # scan on every attached stick (multi-dongle)
 goant scan -o devices.json     # save found devices to a file
+goant antfs-scan               # listen for ANT-FS beacons (file transfers)
 ```
+
+Sticks without a readable USB serial (some CYCPLUS clones) are addressed
+by bus:addr, e.g. `goant scan -serials 1:5`.
 
 ## Testing
 
