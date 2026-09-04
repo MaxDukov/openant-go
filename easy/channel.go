@@ -43,6 +43,16 @@ type channelConfig struct {
 	hasIDList  bool
 	idList     []channelIDEntry
 
+	searchSharing    byte
+	hasSearchSharing bool
+
+	libConfig    byte
+	hasLibConfig bool
+
+	advBurst    bool
+	advBurstMax uint16
+	hasAdvBurst bool
+
 	opened bool
 	rxScan bool
 }
@@ -295,9 +305,16 @@ func (c *Channel) SetSearchWaveform(waveform []byte) error {
 // the proximity search (normal search), 1..255 restricts it to the given
 // number of signal bins (~dB of RX attenuation). Use it to auto-pick the
 // closest sensor when several identical ones are around.
+//
+// The underlying message id differs between protocol revisions (0x60
+// modern, 0x71 Rev 5.1); the node selects it automatically.
 func (c *Channel) SetProximitySearch(threshold byte) error {
+	id := ant.IDSetProximitySearch
+	if c.node.Core.ProtocolLegacy() {
+		id = ant.IDSetProximitySearchLegacy
+	}
 	c.node.Core.SetProximitySearch(c.ID, threshold)
-	if err := c.node.WaitForResponse(ant.IDSetProximitySearch); err != nil {
+	if err := c.node.WaitForResponse(id); err != nil {
 		return err
 	}
 	c.node.mu.Lock()
@@ -342,6 +359,118 @@ func (c *Channel) AddChannelID(deviceNum uint16, deviceType byte) error {
 func (c *Channel) RequestMessage(msgID ant.MessageID) error {
 	c.node.Core.RequestMessage(c.ID, msgID)
 	return c.node.WaitForSpecial(msgID)
+}
+
+// SetSearchSharing makes this channel share one search with the other
+// channels of the node: the shared search takes place every
+// cyclesPerSearch periods on each channel in turn, saving bandwidth and
+// battery when many slave channels search at once. 0 disables it.
+//
+// The underlying message id differs between protocol revisions (0x53
+// modern, 0x81 Rev 5.1); the node selects it automatically.
+func (c *Channel) SetSearchSharing(cyclesPerSearch byte) error {
+	id := ant.IDChannelSearchSharing
+	if c.node.Core.ProtocolLegacy() {
+		id = ant.IDChannelSearchSharingLegacy
+	}
+	c.node.Core.SetSearchSharing(c.ID, cyclesPerSearch)
+	if err := c.node.WaitForResponse(id); err != nil {
+		return err
+	}
+	c.node.mu.Lock()
+	c.cfg.searchSharing, c.cfg.hasSearchSharing = cyclesPerSearch, true
+	c.node.mu.Unlock()
+	return nil
+}
+
+// SetLIBConfig sets the library configuration: the flag bits
+// (ant.LIBConfigRxTimestamp, ant.LIBConfigRSSI, ant.LIBConfigChannelID)
+// select which extended data (timestamp, RSSI, channel ID) is appended to
+// received data messages.
+//
+// The underlying message id differs between protocol revisions (0x71
+// modern, 0x6E Rev 5.1); the node selects it automatically.
+func (c *Channel) SetLIBConfig(config byte) error {
+	id := ant.IDLIBConfig
+	if c.node.Core.ProtocolLegacy() {
+		id = ant.IDLIBConfigLegacy
+	}
+	c.node.Core.SetLIBConfig(c.ID, config)
+	if err := c.node.WaitForResponse(id); err != nil {
+		return err
+	}
+	c.node.mu.Lock()
+	c.cfg.libConfig, c.cfg.hasLibConfig = config, true
+	c.node.mu.Unlock()
+	return nil
+}
+
+// EnableAdvancedBurst enables advanced burst transfers with
+// maxPacketSize payload bytes per packet (0 = 24 byte maximum; Rev 5.1
+// devices support 8, 16 or 24 byte packets). Data can then be sent with
+// SendAdvancedBurst; received advanced bursts are reassembled into
+// OnBurstData like regular ones.
+//
+// The underlying message id differs between protocol revisions (0x61
+// modern, 0x78 Rev 5.1); the node selects it automatically.
+func (c *Channel) EnableAdvancedBurst(maxPacketSize uint16) error {
+	id := ant.IDConfigAdvancedBurst
+	if c.node.Core.ProtocolLegacy() {
+		id = ant.IDConfigAdvancedBurstLegacy
+	}
+	if err := c.node.Core.SetAdvancedBurst(true, maxPacketSize); err != nil {
+		return err
+	}
+	if err := c.node.WaitForResponse(id); err != nil {
+		return err
+	}
+	c.node.mu.Lock()
+	c.cfg.advBurst, c.cfg.advBurstMax, c.cfg.hasAdvBurst = true, maxPacketSize, true
+	c.node.mu.Unlock()
+	return nil
+}
+
+// DisableAdvancedBurst disables advanced burst transfers again.
+func (c *Channel) DisableAdvancedBurst() error {
+	id := ant.IDConfigAdvancedBurst
+	if c.node.Core.ProtocolLegacy() {
+		id = ant.IDConfigAdvancedBurstLegacy
+	}
+	if err := c.node.Core.SetAdvancedBurst(false, 0); err != nil {
+		return err
+	}
+	if err := c.node.WaitForResponse(id); err != nil {
+		return err
+	}
+	c.node.mu.Lock()
+	c.cfg.advBurst, c.cfg.advBurstMax, c.cfg.hasAdvBurst = false, 0, true
+	c.node.mu.Unlock()
+	return nil
+}
+
+// SendAdvancedBurst sends data as an advanced burst (multiple packets of
+// the configured size), retrying the whole burst on transfer failure.
+func (c *Channel) SendAdvancedBurst(data []byte) error {
+	for {
+		if err := c.node.Core.SendAdvancedBurst(c.ID, data); err != nil {
+			return err
+		}
+		if _, err := c.node.WaitForEvent(ant.EventTransferTxStart); err != nil {
+			if err == ErrTransferFailed {
+				c.logger().Warn("advanced burst transfer start failed, retrying", "channel", c.ID)
+				continue
+			}
+			return err
+		}
+		if _, err := c.node.WaitForEvent(ant.EventTransferTxCompleted); err != nil {
+			if err == ErrTransferFailed {
+				c.logger().Warn("advanced burst transfer failed, retrying", "channel", c.ID)
+				continue
+			}
+			return err
+		}
+		return nil
+	}
 }
 
 // SendBroadcastData sends 8 bytes of broadcast data immediately.
@@ -446,6 +575,25 @@ func (c *Channel) restore() error {
 			if err := c.AddChannelID(e.deviceNum, e.deviceType); err != nil {
 				return err
 			}
+		}
+	}
+	if cfg.hasSearchSharing {
+		if err := c.SetSearchSharing(cfg.searchSharing); err != nil {
+			return err
+		}
+	}
+	if cfg.hasLibConfig {
+		if err := c.SetLIBConfig(cfg.libConfig); err != nil {
+			return err
+		}
+	}
+	if cfg.hasAdvBurst {
+		if cfg.advBurst {
+			if err := c.EnableAdvancedBurst(cfg.advBurstMax); err != nil {
+				return err
+			}
+		} else if err := c.DisableAdvancedBurst(); err != nil {
+			return err
 		}
 	}
 	if cfg.rxScan {

@@ -121,20 +121,42 @@ heart-rate / health sensors first.
 - ✅ **Proximity search (0x60)** — DONE: Core.SetProximitySearch and
   Channel.SetProximitySearch (threshold 0 disables, 1..255 signal bins);
   replayed after reconnect; limit search radius to auto-pick the closest
-  HR belt among several.
+  HR belt among several. NOTE: 0x60 is the modern message id; on Rev 5.1
+  devices (ANTUSB2/ANTUSB-m era) proximity search is 0x71 — the node
+  picks the right one after protocol detection (see below).
 - ✅ **Channel ID lists (0x59 config / 0x5A add)** — DONE:
   Core.SetChannelIDList / Core.AddChannelID and Channel.EnableChannelIDList
   (size) / AddChannelID (device number + type wildcard), hardware filter
   for "listen to these N device IDs" (multi-device scans without RF
   noise); list entries replayed after reconnect.
-- ⬜ **Advanced burst config (0x6E)** — longer burst payloads; speeds up
-  ANT-FS file downloads from trainers/watches up to ~4x.
-- ⬜ **Channel search sharing (0x71)** — several channels share one
-  search (battery/bandwidth saving with many channels).
-- ⬜ **LIB config (0x70)** — hardware filtering of non-matching traffic.
-- ⬜ **Blood Pressure profile** — device type 42 (measurement download
-  over ANT-FS client); low value: requires ANT-FS client emulation and
-  very few devices broadcast it.
+- ✅ **Advanced burst** — DONE: Core.SetAdvancedBurst / easy
+  EnableAdvancedBurst-DisableAdvancedBurst / Channel.SendAdvancedBurst;
+  received EXTENDED_BURST_DATA packets are reassembled into regular burst
+  events (sequence wrap and terminating short/empty packets handled).
+  Message ids differ per protocol revision: Rev 5.1 configures with 0x78
+  (packet size enum 8/16/24), modern firmware with 0x61 and carries burst
+  data in 0x6E; detection picks automatically.
+- ✅ **Channel search sharing** — DONE: Core.SetSearchSharing /
+  Channel.SetSearchSharing (cycles per search, 0 disables). Rev 5.1 uses
+  message 0x81, modern firmware 0x53; picked automatically.
+- ✅ **LIB config** — DONE: Core.SetLIBConfig / Channel.SetLIBConfig with
+  the flag bits LIBConfigRxTimestamp (0x20), LIBConfigRSSI (0x40),
+  LIBConfigChannelID (0x80): what extended data is appended to received
+  data messages. Rev 5.1 message 0x6E, modern 0x71; picked automatically.
+- ✅ **Protocol revision detection** — DONE: Core.DetectProtocol (called
+  automatically by easy.New*): legacy (Rev 5.1) firmware answers a
+  0x61 serial request with the 4-byte serial number, modern firmware
+  either answers with the 3-byte advanced burst configuration or
+  supports the 0x3F serial request instead. Core.SetProtocolLegacy can
+  override. Verified on hardware: the CYCPLUS ANTUSB2 clone answers the
+  0x61 request with its serial (legacy mode).
+- ✅ **Blood Pressure profile** — DONE (display side): device type 18
+  (channel period 8192, RF 57), Measurement Data Page 1 decoding
+  (systolic/diastolic u16, MAP, heart rate, raw flags byte, invalid
+  markers). The full profile specification (pages 2-5, file transfer
+  download) is no longer publicly distributed, so only the broadcast
+  measurement page is decoded and flagged as unverified; measurement
+  download via ANT-FS client emulation remains out of scope.
 
 
 
@@ -218,10 +240,11 @@ heart-rate / health sensors first.
       detach failures on Linux now log a warning with the udev rules hint
       instead of being swallowed.
 - ⬜ EVENT_TX not reported by ANTUSB2 firmware BLJ06.01.01 in master mode
-      (verified: openant 1.3.4 receives none either). Investigate
-      CONFIG_EVENT_BUFFERING / LIB_CONFIG (0x6E) enabling of TX event
-      reporting for master channels; broadcast data itself transmits fine
-      (easy.Channel ships an EVENT_TX fallback ticker since 0.1.1).
+      (verified: openant 1.3.4 receives none either). LIB config is now
+      implemented but only controls extended RX message content; the
+      remaining hypothesis is event buffering configuration for master
+      channels. Broadcast data itself transmits fine (easy.Channel ships
+      an EVENT_TX fallback ticker since 0.1.1).
 - ✅ **#6/#111 Missed readings** — DONE: buffer caps (burst 1 MiB, event
       buffer drop-oldest) plus Core.Metrics() drop/error counters (bad
       frames, dropped bursts, read/write errors, reconnects), exposed via

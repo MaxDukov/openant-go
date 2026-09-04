@@ -26,12 +26,17 @@ const (
 	IDStartupMessage    MessageID = 0x6F
 	IDSerialError       MessageID = 0xAE
 	IDAntVersion        MessageID = 0x3E
+	IDSerialNumber      MessageID = 0x61 // legacy serial response; modern firmware answers 0x3F instead
+	IDSerialNumberNew   MessageID = 0x3F
 	IDCapabilities      MessageID = 0x54
-	IDSerialNumber      MessageID = 0x61
 	IDChannelStatus     MessageID = 0x52
 	IDChannelIDResponse MessageID = 0x51 // same value as IDSetChannelID
 
-	// Configuration commands.
+	// Configuration commands. Some message ids changed meaning between
+	// ANT Message Protocol Rev 5.1 (nRF24AP2/ANTUSB2-era devices) and
+	// modern firmware; both spellings are provided and Core picks the
+	// right one depending on the detected protocol revision (see
+	// Core.SetProtocolLegacy).
 	IDUnassignChannel          MessageID = 0x41
 	IDAssignChannel            MessageID = 0x42
 	IDChannelPeriod            MessageID = 0x43
@@ -48,15 +53,33 @@ const (
 	IDChannelIDList            MessageID = 0x59
 	IDAddChannelID             MessageID = 0x5A
 	IDOpenRxScanMode           MessageID = 0x5B
-	IDSetProximitySearch       MessageID = 0x60
+	IDSetProximitySearch       MessageID = 0x60 // modern; Rev 5.1 devices use IDSetProximitySearchLegacy
+	IDSetProximitySearchLegacy MessageID = 0x71 // Rev 5.1 proximity search (0x71); on modern firmware 0x71 is LIB config
 	IDEnableExtendedMessages   MessageID = 0x66
 	IDEnableLED                MessageID = 0x68
 	IDLowPrioritySearchTimeout MessageID = 0x63
+
+	// LIB config (extended RX message content: timestamp/RSSI/channel id).
+	IDLIBConfig       MessageID = 0x71 // modern; on Rev 5.1 devices 0x71 is proximity search
+	IDLIBConfigLegacy MessageID = 0x6E // Rev 5.1 Lib Config (0x6E); modern 0x6E is extended burst data
+
+	// Channel search sharing.
+	IDChannelSearchSharing       MessageID = 0x53 // modern
+	IDChannelSearchSharingLegacy MessageID = 0x81 // Rev 5.1 (0x81); unassigned on modern firmware
+
+	// Advanced burst configuration.
+	IDConfigAdvancedBurst       MessageID = 0x61 // modern; on Rev 5.1 devices 0x61 is the serial number response
+	IDConfigAdvancedBurstLegacy MessageID = 0x78 // Rev 5.1 Configure Advanced Burst
 
 	// Data messages.
 	IDBroadcastData     MessageID = 0x4E
 	IDAcknowledgedData  MessageID = 0x4F
 	IDBurstTransferData MessageID = 0x50
+
+	// IDExtendedBurstData is the advanced burst data packet of modern
+	// firmware. Rev 5.1 devices do not use it: their advanced burst
+	// packets arrive as plain BURST_TRANSFER_DATA frames.
+	IDExtendedBurstData MessageID = 0x6E
 
 	// Legacy extended data messages.
 	IDLegacyExtendedBroadcast    MessageID = 0x5D
@@ -77,8 +100,6 @@ func (id MessageID) String() string {
 		return "ANT_VERSION"
 	case IDCapabilities:
 		return "CAPABILITIES"
-	case IDSerialNumber:
-		return "SERIAL_NUMBER"
 	case IDChannelStatus:
 		return "CHANNEL_STATUS"
 	case IDUnassignChannel:
@@ -107,6 +128,10 @@ func (id MessageID) String() string {
 		return "REQUEST_MESSAGE"
 	case IDSetChannelID:
 		return "SET_CHANNEL_ID"
+	case IDChannelSearchSharing:
+		return "CHANNEL_SEARCH_SHARING"
+	case IDChannelSearchSharingLegacy:
+		return "CHANNEL_SEARCH_SHARING (rev 5.1)"
 	case IDChannelIDList:
 		return "SET_CHANNEL_ID_LIST"
 	case IDAddChannelID:
@@ -115,6 +140,21 @@ func (id MessageID) String() string {
 		return "OPEN_RX_SCAN_MODE"
 	case IDSetProximitySearch:
 		return "SET_PROXIMITY_SEARCH"
+	case IDSetProximitySearchLegacy:
+		// 0x71 is proximity search on Rev 5.1 devices, LIB config
+		// (IDLIBConfig, same value) on modern ones.
+		return "SET_PROXIMITY_SEARCH/LIB_CONFIG"
+	case IDConfigAdvancedBurst:
+		// 0x61 is the serial number response (IDSerialNumber, same
+		// value) on Rev 5.1 devices, the advanced burst configuration on
+		// modern ones.
+		return "SERIAL_NUMBER/CONFIG_ADVANCED_BURST"
+	case IDConfigAdvancedBurstLegacy:
+		return "CONFIG_ADVANCED_BURST (rev 5.1)"
+	case IDLIBConfigLegacy:
+		// 0x6E is Lib Config on Rev 5.1 devices, advanced burst data
+		// (IDExtendedBurstData, same value) on modern ones.
+		return "LIB_CONFIG/EXTENDED_BURST_DATA"
 	case IDEnableExtendedMessages:
 		return "ENABLE_EXT_RX_MESGS"
 	case IDEnableLED:

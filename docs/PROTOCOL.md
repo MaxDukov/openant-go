@@ -43,10 +43,11 @@ Unassigning before the close event yields `CHANNEL_IN_WRONG_STATE`
 
 ## Search helpers
 
-- **Proximity search** (`0x60`, `Channel.SetProximitySearch`): payload
+- **Proximity search** (`Channel.SetProximitySearch`): payload
   `<channel> <threshold>`; 0 disables, 1..255 limits the search to the
   given number of signal bins (~dB of attenuation). The threshold applies
   while the channel is searching and is forgotten once connected.
+  Message id: `0x60` on modern firmware, `0x71` on Rev 5.1 devices.
 - **Channel ID list** (`0x59` + `0x5A`, `Channel.EnableChannelIDList` /
   `AddChannelID`): `0x59 <channel> <size>` switches the channel to
   list-based matching, then `0x5A <channel> <num LSB> <num MSB> <type>`
@@ -54,6 +55,48 @@ Unassigning before the close event yields `CHANNEL_IN_WRONG_STATE`
   to the listed IDs regardless of the id set with `0x51`. Entries are
   added only while the channel is not open. Both are replayed after a
   reconnect together with the rest of the channel configuration.
+- **Channel search sharing** (`Channel.SetSearchSharing`):
+  `<channel> <cycles>`; the shared search alternates between slave
+  channels that search different RF channels/networks, saving bandwidth
+  and battery. 0 disables. Message id: `0x53` modern, `0x81` Rev 5.1.
+
+## Library config and advanced burst
+
+- **LIB config** (`Channel.SetLIBConfig`): `<channel> <flags>` selects
+  what extended data is appended to received data messages:
+  `0x20` RX timestamp, `0x40` RSSI, `0x80` channel ID. Message id: `0x71`
+  modern, `0x6E` Rev 5.1.
+- **Advanced burst** (`Channel.EnableAdvancedBurst(maxPacketSize)` /
+  `DisableAdvancedBurst` / `SendAdvancedBurst`): increases the burst
+  packet payload from 8 to up to 24 bytes (~60 kbps). Modern firmware
+  configures with `0x61 <filler=0> <enable> <size LSB> <size MSB>` and
+  transmits data in `0x6E <channel> <flags> <data...>` packets
+  (flags bit 7 = extended data present, bits 0-6 = sequence number 0..127;
+  a packet shorter than the maximum terminates the transfer, an empty
+  packet terminates an exact multiple). Rev 5.1 devices configure with
+  `0x78 <filler=0> <enable> <size enum 1/2/3> <required features (3
+  bytes)> <optional features (3 bytes)>` and do not use a separate data
+  message type. The library reassembles received advanced bursts into
+  regular burst events.
+- **Protocol revision detection** (`ant.Core.DetectProtocol`, automatic
+  in easy.New*): the message ids of these helpers changed between the
+  ANT Message Protocol Rev 5.1 (nRF24AP2/ANTUSB2/ANTUSB-m era) and modern
+  firmware:
+
+  | Function            | Rev 5.1 | Modern |
+  |---------------------|---------|--------|
+  | Proximity search    | `0x71`  | `0x60` |
+  | LIB config          | `0x6E`  | `0x71` |
+  | Search sharing      | `0x81`  | `0x53` |
+  | Advanced burst cfg  | `0x78`  | `0x61` |
+  | Serial number       | `0x61` (4-byte response) | `0x3F` request |
+
+  Detection sends a `0x61` request: a 4-byte reply is the Rev 5.1 serial
+  number, a 3-byte reply is the modern advanced burst configuration.
+  Note that many stick firmwares answer `RESPONSE_NO_ERROR` to unknown
+  message ids, so acceptance of a command is not evidence of support.
+  Verified on hardware: a CYCPLUS ANTUSB2 clone (BLJ06.01.01) reports its
+  serial through the `0x61` request (Rev 5.1 behaviour).
 
 ## Networks and keys
 

@@ -87,6 +87,15 @@ func (b *eventBuffer) waitForAttempts(match matcher, attempts int, interval time
 	return ant.Event{}, ErrWaitTimeout
 }
 
+// reset discards every buffered event. Used right after Node start-up to
+// drop protocol-detection responses whose message id is ambiguous between
+// protocol revisions (0x61 serial number vs advanced burst config).
+func (b *eventBuffer) reset() {
+	b.mu.Lock()
+	b.events = nil
+	b.mu.Unlock()
+}
+
 // removeAt removes the i-th event; b.mu must be held.
 func (b *eventBuffer) removeAt(i int) {
 	b.events = append(b.events[:i], b.events[i+1:]...)

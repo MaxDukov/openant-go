@@ -13,9 +13,13 @@ ANT and ANT-FS library for Go — a port of the Python
 - ANT base interface (framing, USB/serial drivers, event pipeline):
   multi-dongle support (`ant.Sticks`, selection by serial or bus:addr),
   configurable USB read timeouts, drop/error metrics
-  (`ant.Core.Metrics`), proximity search and channel ID lists.
+  (`ant.Core.Metrics`), proximity search, channel ID lists, channel
+  search sharing, LIB config (RSSI/timestamp/channel-ID extended data)
+  and advanced burst transfers — with automatic protocol-revision
+  detection (Rev 5.1 vs modern message ids).
 - ANT-FS (command pipe, directory listings, download, upload, erase, ...).
-- ANT+ device profiles and a base type for custom ones (`devices`).
+- ANT+ device profiles and a base type for custom ones (`devices`),
+  including blood pressure measurement decoding.
 - Device emulation (master mode): heart rate belt
   (`devices.NewHeartRateMaster`), trainer control (FE-C target power,
   wind/track resistance, user config, capabilities), generic broadcast
