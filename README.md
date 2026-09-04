@@ -120,11 +120,18 @@ by bus:addr, e.g. `goant scan -serials 1:5`.
 ```sh
 make test          # unit tests (simulator, no hardware)
 make test-race     # with the race detector
+make bench         # benchmarks: frame parser, page decoders, InfluxFields
+make fuzz          # quick fuzz smoke over every parser target
 make integration   # requires a real ANT USB stick and ANT_TEST_USB_STICK=1
 ```
 
 The unit tests run entirely against the `anttest.SimDriver` stick
 simulator; hardware is only needed for the `integration` build tag.
+
+CI runs `go test -race`, staticcheck and a fuzz smoke (15 s per parser
+target); a scheduled workflow fuzzes the same targets nightly with a 3
+minute budget each, keeping incremental corpora in the build cache and
+uploading failing inputs as artifacts.
 
 ## Design notes (vs. the Python original)
 
