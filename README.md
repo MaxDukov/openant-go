@@ -42,7 +42,8 @@ ANT and ANT-FS library for Go — a port of the Python
   - ANTUSB2 (0fcf:1008) or ANTUSB-m (0fcf:1009),
   - serial/CDC sticks (0fcf:1004) on Linux.
 - On Linux, install `resources/42-ant-usb-sticks.rules` into
-  `/etc/udev/rules.d/` so the sticks are usable without root.
+  `/etc/udev/rules.d/` so the sticks are usable without root — the CLI
+  does it for you: `sudo goant udev` (or `sudo make install-udev`).
 
 ## Installation
 
@@ -103,6 +104,7 @@ goant scan -s <serial>         # scan on a specific stick
 goant scan -all                # scan on every attached stick (multi-dongle)
 goant scan -o devices.json     # save found devices to a file
 goant antfs-scan               # listen for ANT-FS beacons (file transfers)
+sudo goant udev                # install udev rules for the sticks (Linux)
 ```
 
 Sticks without a readable USB serial (some CYCPLUS clones) are addressed

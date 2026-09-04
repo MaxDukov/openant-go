@@ -1,6 +1,6 @@
 BINARY := goant
 
-.PHONY: all build test test-race vet lint examples integration clean
+.PHONY: all build test test-race vet lint examples integration install-udev clean
 
 all: vet build
 
@@ -25,6 +25,11 @@ integration:
 
 examples:
 	go build ./examples/...
+
+# Install the udev rules for ANT USB sticks (Linux, needs root):
+#   sudo make install-udev
+install-udev:
+	go run ./cmd/goant udev
 
 clean:
 	rm -f $(BINARY)
