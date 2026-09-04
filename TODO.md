@@ -214,7 +214,12 @@ heart-rate / health sensors first.
 - ⬜ CLI `influx` and `mqtt` subcommands (streaming device data to
       InfluxDB/MQTT, incl. `--topic-per-field`/`--device-topic` behaviour)
       — deferred by design decision.
-- ⬜ udev rules installer command (`goant udev` or `make install-udev`).
+- ✅ udev rules installer — DONE: `goant udev` installs the bundled
+      resources/42-ant-usb-sticks.rules (embedded into the binary so
+      `go install` builds carry it) into /etc/udev/rules.d/, reloads the
+      rules via udevadm and prints the plugdev group / replug next steps;
+      `-dest` and `-dry_run` flags for packaging and tests; also
+      available as `sudo make install-udev`.
 
 ## Robustness (from bug reports)
 
@@ -257,8 +262,16 @@ heart-rate / health sensors first.
       etc.) need stable serialisation for the future influx CLI.
 - ⬜ **#109 datetime out of bounds** — guarded in `tryDateTime`; fuzz
       tests added, keep corpus growing.
-- ⬜ **#84/#44 BSC sensors not connecting** — document wildcard vs exact
-      device id usage; verify period/transmission type quirks.
+- ✅ **#84/#44 BSC sensors not connecting** — DONE (documentation and
+      verified parameters): channel parameters match the ANT+ Bike Speed
+      and Cadence profile and python openant exactly (speed: 123/8118,
+      cadence: 122/8102, combined: 121/8086, RF 57). Documented the real
+      causes reported in the issues in "Connecting to speed / cadence
+      sensors" (devices package docs): the printed sensor number often is
+      not the ANT+ device number (discover with goant scan), transType 0
+      wildcard is preferred because sensors flip the pairing/LSN bit on
+      re-pairing, combo vs separate device types, motion wake-up and the
+      indefinite default search timeout.
 - ✅ **#40 serial port permission errors** — DONE: USB and serial open
       failures caused by missing permissions are wrapped in
       ant.ErrPermission with an actionable hint (udev rules / dialout /

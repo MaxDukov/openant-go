@@ -167,13 +167,43 @@ func onSpeedCadencePages(d *baseDevice, speed *BikeSpeedData, cadence *BikeCaden
 	}
 }
 
+// Connecting to speed / cadence sensors (openant issues #84/#44)
+//
+// The channel parameters below match the ANT+ Bike Speed and Cadence
+// device profile (speed: type 123 / period 8118, cadence: type 122 /
+// period 8102, combined: type 121 / period 8086, RF frequency 57), so a
+// sensor that does not connect is almost always a search-pairing issue:
+//
+//   - deviceID 0 (wildcard) connects to the first sensor broadcasting
+//     the device type; deviceID > 0 connects to exactly that ANT+ device
+//     number. The number printed on the sensor or shown by other apps is
+//     often NOT the ANT+ device number - discover it with `goant scan`
+//     (or devices.Scanner) first.
+//   - transType 0 is a transmission-type wildcard and is what you almost
+//     always want. Sensors flip the least significant nibble / pairing
+//     bit (0x80) of the transmission type every time they re-pair with a
+//     new display, so pinning a specific value can silently prevent the
+//     connection.
+//   - Combined (121) vs separate: many "combo" sensors broadcast device
+//     type 121 only, while speed-only or cadence-only modes broadcast
+//     123/122. If the sensor does not connect with one type, scan with
+//     deviceID 0 and check the discovered device type before retrying
+//     with a pinned type.
+//   - Speed sensors often broadcast only while the wheel is spinning
+//     (wake-up: spin the wheel); cadence sensors usually idle-broadcast
+//     every ~4 s when awake.
+//   - The base profile searches indefinitely (search timeout 0xFF). Use
+//     WaitFound with a timeout when you need bounded discovery.
+
 // BikeSpeed is the ANT+ bicycle speed profile (device type 123).
 type BikeSpeed struct {
 	baseDevice
 	Data BikeSpeedData
 }
 
-// NewBikeSpeed creates the profile.
+// NewBikeSpeed creates the profile. deviceID 0 connects to the first
+// speed sensor found; transType 0 is a transmission-type wildcard (see
+// "Connecting to speed / cadence sensors" above).
 func NewBikeSpeed(node *easy.Node, deviceID int, transType int) (*BikeSpeed, error) {
 	b := &BikeSpeed{}
 	b.node = node
@@ -202,7 +232,9 @@ type BikeCadence struct {
 	Data BikeCadenceData
 }
 
-// NewBikeCadence creates the profile.
+// NewBikeCadence creates the profile. deviceID 0 connects to the first
+// cadence sensor found; transType 0 is a transmission-type wildcard (see
+// "Connecting to speed / cadence sensors" above).
 func NewBikeCadence(node *easy.Node, deviceID int, transType int) (*BikeCadence, error) {
 	b := &BikeCadence{}
 	b.node = node
@@ -236,7 +268,9 @@ type BikeSpeedCadence struct {
 }
 
 // NewBikeSpeedCadence creates the combined profile. wheelCircumferenceM
-// may be nil to skip speed/distance calculations.
+// may be nil to skip speed/distance calculations. deviceID 0 connects to
+// the first combined sensor found; transType 0 is a transmission-type
+// wildcard (see "Connecting to speed / cadence sensors" above).
 func NewBikeSpeedCadence(node *easy.Node, deviceID int, transType int) (*BikeSpeedCadence, error) {
 	b := &BikeSpeedCadence{}
 	b.node = node

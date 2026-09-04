@@ -22,6 +22,7 @@ Commands:
 	antfs-scan
 		Search for nearby ANT-FS devices by listening for beacons
 	sticks	List attached ANT USB sticks by serial number
+	udev	Install udev rules for ANT USB sticks (Linux, needs root)
 	version	Print the version
 `
 
@@ -45,6 +46,11 @@ func main() {
 		}
 	case "sticks":
 		runSticks()
+	case "udev":
+		if err := runUdev(args); err != nil {
+			fmt.Fprintln(os.Stderr, "udev:", err)
+			os.Exit(1)
+		}
 	case "version", "-v", "--version":
 		fmt.Println("goant", version)
 	case "help", "-h", "--help":
