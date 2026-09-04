@@ -30,8 +30,8 @@ ANT and ANT-FS library for Go — a port of the Python
   - `fs` — ANT-FS library (openant.fs),
   - `devices` — ANT+ profiles (openant.devices).
 - `anttest` — scriptable in-memory driver and stick simulator for tests.
-- CLI `goant` (`scan`, `sticks`, `antfs-scan`, `version`; influx/mqtt: see
-  TODO.md).
+- CLI `goant` (`scan`, `sticks`, `antfs-scan`, `influx`, `mqtt`, `udev`,
+  `version`).
 - 14 example applications under `examples/` (ports of openant's examples).
 
 ## Requirements
@@ -105,6 +105,11 @@ goant scan -all                # scan on every attached stick (multi-dongle)
 goant scan -o devices.json     # save found devices to a file
 goant antfs-scan               # listen for ANT-FS beacons (file transfers)
 sudo goant udev                # install udev rules for the sticks (Linux)
+goant influx -db ant HeartRate # stream an HRM to InfluxDB (v1 API)
+goant influx -token <tok> -bucket ant -org me BikeSpeedCadence
+goant mqtt -host broker.local HeartRate   # JSON events on openant/HeartRate/<id>
+goant mqtt -topic-per-field -device-topic HeartRate:123:sensors/hr HeartRate
+goant influx -config devices.json -all    # stream a saved device list
 ```
 
 Sticks without a readable USB serial (some CYCPLUS clones) are addressed

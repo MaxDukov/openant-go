@@ -211,9 +211,14 @@ heart-rate / health sensors first.
       devices/fs), godoc examples (easy, devices), docs/PROTOCOL.md with
       frame format, message flow, ANT-FS summary and firmware quirks. A
       hosted docs site remains open-ended.
-- ⬜ CLI `influx` and `mqtt` subcommands (streaming device data to
-      InfluxDB/MQTT, incl. `--topic-per-field`/`--device-topic` behaviour)
-      — deferred by design decision.
+- ✅ CLI `influx` and `mqtt` subcommands — DONE: `goant influx` streams
+      device data to InfluxDB (v1 `/write?db=` or v2 `/api/v2/write` with
+      `-token`; line protocol, precision=ns, `-interval` batching),
+      `goant mqtt` publishes JSON events to an MQTT broker (paho,
+      `-topic-per-field`, repeatable `-device-topic type:id:topic`,
+      auto-reconnect). Both share the scan stick selection (`-serial`,
+      `-serials`, `-all`) and accept a positional device name or a
+      `-config` device list.
 - ✅ udev rules installer — DONE: `goant udev` installs the bundled
       resources/42-ant-usb-sticks.rules (embedded into the binary so
       `go install` builds carry it) into /etc/udev/rules.d/, reloads the
@@ -258,8 +263,12 @@ heart-rate / health sensors first.
       (`fs.SetTime` applies +35 s; may need device quirks).
 - ⬜ **#119 Timezone handling** — document/verify that all timestamps are
       UTC; optionally allow local-time rendering in CLI.
-- ⬜ **#117 Influx list fields** — pointer/array fields (calculated speed
-      etc.) need stable serialisation for the future influx CLI.
+- ✅ **#117 Influx list fields** — DONE: devices.InfluxFields serialises
+      every DeviceData with stable ordering: `influx:"name"` tags (or
+      field names as fallback), `influx:"-"` skip, nil pointers skipped,
+      arrays/slices expanded as `<name>_0`, `_1`, ..., nested structs
+      flattened with a prefix, enums/bytes/uints as int64, time.Time as
+      an RFC3339 string.
 - ⬜ **#109 datetime out of bounds** — guarded in `tryDateTime`; fuzz
       tests added, keep corpus growing.
 - ✅ **#84/#44 BSC sensors not connecting** — DONE (documentation and
