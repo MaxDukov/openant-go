@@ -45,6 +45,15 @@
 //
 // # Data export
 //
-// [ToInfluxJSON] converts any [DeviceData] into a tag/field map suitable
-// for line-protocol writers; the (deferred) influx CLI builds on it.
+// [ToInfluxJSON] and [InfluxFields] convert any [DeviceData] into a
+// tag/field representation suitable for line-protocol writers and JSON
+// payloads; the goant influx/mqtt CLI commands build on them.
+//
+// # Timezone
+//
+// All timestamps in this library are UTC. ANT+ devices do not transmit
+// timezone information: the time and date page (83) is interpreted as
+// UTC ([CommonData.TimeDate], openant issue #119), as are the ANT-FS
+// epoch times in package fs. Render local time with [CommonData.Local]
+// or time.Time.Local.
 package devices

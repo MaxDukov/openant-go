@@ -27,7 +27,7 @@ func main() {
 	}
 
 	var scanner *devices.Scanner
-	var deviceType devices.DeviceType = devices.DeviceTypeUnknown
+	var deviceType = devices.DeviceTypeUnknown
 	var deviceID int
 	if len(os.Args) > 1 {
 		deviceType = devices.DeviceTypeByName(os.Args[1])

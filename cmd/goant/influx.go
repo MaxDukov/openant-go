@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -287,7 +288,7 @@ func buildLine(measurement, staticTags, deviceTags string, fields []devices.Infl
 		return ""
 	}
 	b.WriteByte(' ')
-	b.WriteString(fmt.Sprint(ts.UnixNano()))
+	b.WriteString(strconv.FormatInt(ts.UnixNano(), 10))
 	return b.String()
 }
 

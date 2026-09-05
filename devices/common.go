@@ -156,7 +156,7 @@ type DeviceData interface {
 func ToInfluxJSON(d DeviceData, tags map[string]string) map[string]any {
 	fields := map[string]any{}
 	v := reflect.ValueOf(d)
-	if v.Kind() == reflect.Ptr {
+	if v.Kind() == reflect.Pointer {
 		v = v.Elem()
 	}
 	t := v.Type()
@@ -202,6 +202,11 @@ type BatteryData struct {
 func (BatteryData) DataName() string { return "BatteryData" }
 
 // CommonData holds the ANT+ common pages (80-83).
+//
+// Timezone: the ANT+ time and date page (83) carries no timezone
+// information and is interpreted as UTC (openant issue #119), like all
+// other timestamps in this library. Use Local to render it in the
+// local timezone.
 type CommonData struct {
 	ManufacturerID int    `influx:"manufacturer_id"`
 	SerialNo       uint32 `influx:"serial_no"`
@@ -212,6 +217,16 @@ type CommonData struct {
 	LastBatteryID  int `influx:"last_battery_id"`
 	LastBattery    BatteryData
 	TimeDate       *time.Time
+}
+
+// Local returns a copy with the time and date page rendered in the
+// local timezone (the copy keeps the UTC value when TimeDate is nil).
+func (c CommonData) Local() CommonData {
+	if c.TimeDate != nil {
+		t := c.TimeDate.Local()
+		c.TimeDate = &t
+	}
+	return c
 }
 
 // DataName implements DeviceData.

@@ -1,0 +1,26 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  # Default set (errcheck, govet, ineffassign, staticcheck, unused) plus
+  # a few cheap high-signal checks. staticcheck also runs as a separate
+  # pinned CI step (without the QF quick-fix checks); the settings below
+  # keep both runs consistent.
+  enable:
+    - copyloopvar
+    - misspell
+    - unconvert
+  disable:
+    - errcheck # write paths log errors deliberately; staticcheck covers the rest
+  settings:
+    staticcheck:
+      checks:
+        - all
+        - -QF* # quick-fix suggestions are not part of the standalone staticcheck run
+        - -ST1003 # keep the openant-compatible ANTPLUS_NETWORK_KEY name
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

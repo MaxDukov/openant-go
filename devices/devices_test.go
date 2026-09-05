@@ -272,6 +272,26 @@ func TestToInfluxJSON(t *testing.T) {
 	}
 }
 
+func TestCommonDataLocal(t *testing.T) {
+	utc := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	c := CommonData{TimeDate: &utc}
+	local := c.Local()
+	if local.TimeDate == nil || !local.TimeDate.Equal(utc) {
+		t.Fatalf("Local() = %+v", local.TimeDate)
+	}
+	if local.TimeDate.Location() != time.Local {
+		t.Errorf("Local() location = %v, want time.Local", local.TimeDate.Location())
+	}
+	// The original stays UTC.
+	if c.TimeDate.Location() != time.UTC {
+		t.Errorf("receiver mutated: %v", c.TimeDate.Location())
+	}
+	// nil-safe
+	if (CommonData{}).Local().TimeDate != nil {
+		t.Error("nil TimeDate must stay nil")
+	}
+}
+
 func TestWorkouts(t *testing.T) {
 	w, err := WorkoutFromArrays([]int{100, 200, 300}, []float64{5, 5.5, 10})
 	if err != nil || len(w.Intervals) != 3 {
