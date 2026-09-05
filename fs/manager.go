@@ -11,7 +11,7 @@ import (
 	"github.com/maxdukov/openant-go/easy"
 )
 
-// ANT-FS network key (public ANT-FS key, cf. openant.fs.manager).
+// FSNetworkKey is the public ANT-FS network key (cf. openant.fs.manager).
 var FSNetworkKey = []byte{0xA8, 0xA4, 0x23, 0xB9, 0xF5, 0x5E, 0x63, 0xC1}
 
 // Default session parameters.

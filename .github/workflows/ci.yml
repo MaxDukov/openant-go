@@ -33,6 +33,11 @@ jobs:
       - name: Staticcheck
         run: go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./...
 
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.13.2
+
       - name: Test
         run: go test -race -timeout 10m ./...
 

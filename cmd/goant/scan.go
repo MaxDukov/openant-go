@@ -26,6 +26,7 @@ type scanArgs struct {
 	deviceType string
 	deviceID   int
 	autoCreate bool
+	localtime  bool
 	logLevel   string
 	serial     string
 	serials    string
@@ -133,6 +134,7 @@ Options:
 	fs.IntVar(&a.deviceID, "i", 0, "shorthand for -device_id")
 	fs.BoolVar(&a.autoCreate, "auto_create", false, "instantiate device object when found so that device data is also printed")
 	fs.BoolVar(&a.autoCreate, "a", false, "shorthand for -auto_create")
+	fs.BoolVar(&a.localtime, "localtime", false, "render device timestamps in the local timezone (all ANT+ timestamps are UTC)")
 	fs.StringVar(&a.logLevel, "logging", "WARN", "log level: DEBUG, INFO, WARN, ERROR")
 	fs.StringVar(&a.serial, "serial", "", "serial number of the USB stick to use (see 'goant sticks'); empty = first found")
 	fs.StringVar(&a.serial, "s", "", "shorthand for -serial")
@@ -184,7 +186,6 @@ Options:
 	var wg sync.WaitGroup
 	for _, l := range launchers {
 		wg.Add(1)
-		l := l
 		go func() {
 			defer wg.Done()
 			if err := scanNode(ctx, l, a, dt, logger); err != nil {
@@ -240,6 +241,9 @@ func scanNode(ctx context.Context, l stickLauncher, a scanArgs, dt devices.Devic
 		}
 	}
 	scanner.OnScanUpdate = func(t devices.DeviceTuple, c devices.CommonData) {
+		if a.localtime {
+			c = c.Local()
+		}
 		// Print the vendor name once the device sent common page 80
 		// (openant issue #69).
 		if c.ManufacturerID != 0 && c.ManufacturerID != 0xFFFF {

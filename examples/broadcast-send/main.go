@@ -58,10 +58,10 @@ func main() {
 
 	ch.OnBroadcastTxData = func(data []byte) {
 		var page []byte
-		switch {
-		case pageCount == 0: // manufacturer
+		switch pageCount {
+		case 0: // manufacturer
 			page = []byte{80, 0xFF, 0xFF, 0x01, 0x59, 0x00, 0x20, 0x00}
-		case pageCount == 65: // product info
+		case 65: // product info
 			page = []byte{81, 0xFF, 0xFF, 0x01, 0x55, 0x00, 0x00, 0x00}
 		default:
 			// Update cumulative values at ~2 Hz (spec: 1/2 s updates).

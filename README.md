@@ -133,6 +133,14 @@ target); a scheduled workflow fuzzes the same targets nightly with a 3
 minute budget each, keeping incremental corpora in the build cache and
 uploading failing inputs as artifacts.
 
+## Time handling (timezone)
+
+All timestamps in openant-go are UTC (openant issue #119). ANT+ devices
+do not transmit timezone information: the time and date page (83) is
+interpreted as UTC (`devices.CommonData.TimeDate`), and so are the
+ANT-FS epoch times in the `fs` package. Render local time with
+`CommonData.Local()`/`time.Time.Local`, or run `goant scan -localtime`.
+
 ## Design notes (vs. the Python original)
 
 - Threads → goroutines; `queue.Queue`/`deque+Condition` → channels and a

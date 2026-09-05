@@ -261,16 +261,21 @@ heart-rate / health sensors first.
       easy.Node.Metrics().
 - ⬜ **#39 set_time on Garmin vívofit** — investigate TAI offset handling
       (`fs.SetTime` applies +35 s; may need device quirks).
-- ⬜ **#119 Timezone handling** — document/verify that all timestamps are
-      UTC; optionally allow local-time rendering in CLI.
+- ✅ **#119 Timezone handling** — DONE: documented that all timestamps
+      are UTC (ANT+ page 83 carries no timezone; ANT-FS epoch is UTC;
+      see the devices package docs and README "Time handling");
+      local-time rendering via `CommonData.Local()` and
+      `goant scan -localtime`.
 - ✅ **#117 Influx list fields** — DONE: devices.InfluxFields serialises
       every DeviceData with stable ordering: `influx:"name"` tags (or
       field names as fallback), `influx:"-"` skip, nil pointers skipped,
       arrays/slices expanded as `<name>_0`, `_1`, ..., nested structs
       flattened with a prefix, enums/bytes/uints as int64, time.Time as
       an RFC3339 string.
-- ⬜ **#109 datetime out of bounds** — guarded in `tryDateTime`; fuzz
-      tests added, keep corpus growing.
+- ✅ **#109 datetime out of bounds** — DONE: `tryDateTime` rejects
+      normalised/impossible dates, fuzz coverage in place and corpora
+      grow automatically through the nightly fuzz workflow (corpus
+      caching).
 - ✅ **#84/#44 BSC sensors not connecting** — DONE (documentation and
       verified parameters): channel parameters match the ANT+ Bike Speed
       and Cadence profile and python openant exactly (speed: 123/8118,
@@ -309,6 +314,9 @@ heart-rate / health sensors first.
 - ✅ GitHub Actions CI (ubuntu): gofmt, vet, staticcheck 2025.1.1,
       `go test -race`, build examples+CLI; branch protection requires the
       "test" check on PRs (macOS dropped — not a target architecture).
-- ⬜ golangci-lint as an additional CI linter (staticcheck already covers
-      the core).
+- ✅ golangci-lint as an additional CI linter — DONE: pinned
+      golangci-lint-action (v2.13.2) with a repo .golangci.yml (default
+      set plus copyloopvar/misspell/unconvert; errcheck disabled by
+      design, staticcheck QF/ST1003 aligned with the standalone run);
+      findings fixed.
 

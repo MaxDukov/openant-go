@@ -37,7 +37,7 @@ func TestProximitySearchAndIDList(t *testing.T) {
 				tc.id: {ch.ID, 0},
 			}
 			got := map[ant.MessageID][]byte{}
-			for _, w := range sim.MockDriver.Writes() {
+			for _, w := range sim.Writes() {
 				msgs, _ := ant.ParseFrames(w)
 				for _, m := range msgs {
 					if m.ID == tc.id {
@@ -68,7 +68,7 @@ func TestProximitySearchAndIDList(t *testing.T) {
 		ant.IDAddChannelID:  {ch.ID, 0x34, 0x12, 0x78},
 	}
 	got := map[ant.MessageID][]byte{}
-	for _, w := range sim.MockDriver.Writes() {
+	for _, w := range sim.Writes() {
 		msgs, _ := ant.ParseFrames(w)
 		for _, m := range msgs {
 			if _, ok := want[m.ID]; ok {
@@ -152,7 +152,7 @@ func TestSearchSharingLibConfigAdvancedBurst(t *testing.T) {
 
 			for _, want := range []step{tc.sharing, tc.lib, tc.advOn, tc.advOff} {
 				found := false
-				for _, w := range sim.MockDriver.Writes() {
+				for _, w := range sim.Writes() {
 					msgs, _ := ant.ParseFrames(w)
 					for _, m := range msgs {
 						if m.ID == want.id && slices.Equal(m.Data, want.data) {
