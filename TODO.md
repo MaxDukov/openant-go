@@ -320,3 +320,57 @@ heart-rate / health sensors first.
       design, staticcheck QF/ST1003 aligned with the standalone run);
       findings fixed.
 
+## Roadmap (2026-09)
+
+Next development phases in priority order. Check items off as they land
+(same ✅ convention as above).
+
+### Phase 1 — Robustness and technical debt
+
+- ⬜ Refactor `ant/node.go` (~1000 lines): split reader / dispatcher /
+      reconnect supervisor / config commands into focused files without
+      public API changes; existing tests stay green.
+- ⬜ Shared common-page (80–83) decoder used by both `baseDevice.onData`
+      and `Scanner.scanData` — the copies already drifted (sw-ver
+      format); one decoder, table-driven tests.
+- ⬜ Unify the three near-identical ack/burst retry loops in
+      `easy/channel.go` behind one helper.
+- ⬜ Scanner bookkeeping: structural key (id, type, transType) instead
+      of the `fmt.Sprintf` string — devices sharing id:type but
+      differing in transType overwrite each other's common data.
+- ⬜ `fs.Application.Stop()`: only stop a node the application created
+      (currently kills a foreign node too); make Stop safe when Run was
+      never started.
+- ⬜ Master-mode battery status page 82: serve a real payload on a
+      display request instead of the `TODO` nil in `devices/common.go`.
+- ⬜ Non-blocking `Core.emit` (drop-oldest + drop counter in Metrics)
+      and drop-oldest with counters for the fs beacon/command channels
+      (today: reader blocks / events dropped silently).
+
+### Phase 2 — Protocol and profiles
+
+- ⬜ Bike Radar profile (device type 40, enum already exists) — RX
+      pages per the ANT+ Bike Radar device profile.
+- ⬜ Received-page history (openant #88): small ring buffer of recent
+      raw pages per device for debugging and manual decoding.
+- ⬜ Magene L508 (openant #104): capture non-standard pages, decode or
+      at least pass through with documentation.
+- ⬜ ANT-FS command pipe: parsers for DirectoryFilter (0x05),
+      SetAuthenticationPasskey (0x06), SetClientFriendlyName (0x07),
+      FactoryReset (0x08).
+- ⬜ #39 `fs.SetTime` TAI-offset device quirks (verify against a
+      vívofit); #21 UploadData parsing verification on a wider device
+      set.
+- ⬜ Geocache transport profile (device type 19) — low priority.
+
+### Phase 3 — Ecosystem
+
+- ⬜ Driver-layer unit tests (refactor the USB driver for
+      testability); manual-trigger integration workflow against real
+      hardware.
+- ⬜ `goant prometheus` subcommand — expose Core/easy metrics in
+      Prometheus text format over HTTP (continues the influx/mqtt
+      streaming line).
+- ⬜ Release engineering: CHANGELOG.md, semantic version tags, binary
+      releases of the `goant` CLI (goreleaser or make cross-build).
+
