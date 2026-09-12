@@ -1,0 +1,70 @@
+name: Bug report
+description: Something does not work as expected (English or Russian is fine).
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for taking the time to file a bug! English or Russian — both are welcome.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Include the full error output and what you expected instead.
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - ant (core / drivers)
+        - easy
+        - fs (ANT-FS)
+        - devices (ANT+ profiles)
+        - cmd/goant CLI
+        - examples
+        - other
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: ANT stick and devices involved
+      description: e.g. ANTUSB2 (0fcf:1008), Garmin HRM Dual, Tacx Neo...
+      placeholder: "goant sticks output helps"
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: A minimal code snippet or CLI command sequence.
+      placeholder: |
+        goant scan -t HeartRate
+        # or
+        ```go
+        node, _ := easy.New()
+        ```
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: openant-go version / commit
+      placeholder: v0.1.2 or commit sha
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: OS
+      options:
+        - Linux
+        - macOS
+        - Windows (untested upstream, but let us know)
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Logs with `-auto_create`, USB dumps, screenshots.

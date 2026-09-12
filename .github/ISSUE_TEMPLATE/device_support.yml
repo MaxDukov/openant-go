@@ -1,0 +1,58 @@
+name: Device support
+description: A specific ANT+ sensor or trainer does not connect or sends unknown data (English or Russian is fine).
+labels: [device-support]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Many device reports turn out to be fixable documentation or a
+        non-standard firmware behaviour — thank you for helping map the
+        device zoo! English or Russian — both are welcome.
+  - type: input
+    id: device-model
+    attributes:
+      label: Device model
+      description: Exact model name/number.
+      placeholder: e.g. Magene L508, Garmin HRM-Pro, Wahoo KICKR Core
+    validations:
+      required: true
+  - type: dropdown
+    id: problem
+    attributes:
+      label: What is wrong?
+      options:
+        - Device is not found at all
+        - Device found but never connects / no data
+        - Connects, but data looks wrong
+        - Connects, but some pages are not decoded
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: scan-output
+    attributes:
+      label: `goant scan -auto_create` output
+      description: Run against the device and paste the output. Remove anything you consider private (device numbers are fine).
+    validations:
+      required: true
+  - type: input
+    id: stick
+    attributes:
+      label: ANT stick
+      placeholder: e.g. ANTUSB2 (0fcf:1008), CYCPLUS clone
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: openant-go version / commit
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Already tried
+      options:
+        - label: Searching by device number from `goant scan` (not the printed sensor number)
+        - label: transType 0 (wildcard)
+        - label: Different USB port / powered hub
