@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -109,13 +110,28 @@ type StickInfo struct {
 }
 
 // String renders the stick as "product serial=X bus=N addr=N"; unreadable
-// serials are rendered as "<unreadable>".
+// serials are rendered as "<unreadable>". Control characters (broken USB
+// string descriptors on some clones) are stripped so the output stays
+// terminal-safe.
 func (s StickInfo) String() string {
-	serial := s.Serial
+	serial := SanitizeSerial(s.Serial)
 	if serial == "" {
 		serial = "<unreadable>"
 	}
 	return fmt.Sprintf("%s serial=%s bus=%d addr=%d", s.Product, serial, s.Bus, s.Address)
+}
+
+// SanitizeSerial strips ASCII control characters (C0 and DEL) from a USB
+// serial string. Sticks with broken descriptors embed NUL bytes and
+// escape sequences; printing them raw garbles terminal output and log
+// files. Non-empty printable text is returned unchanged.
+func SanitizeSerial(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 var (

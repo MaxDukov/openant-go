@@ -12,6 +12,13 @@ Planned work is tracked in [TODO.md](TODO.md).
 ### Added
 
 - Phased roadmap: robustness/technical debt, protocol/profiles, ecosystem.
+- README demo GIF of a live `goant scan` finding a heart rate monitor.
+
+### Fixed
+
+- `goant sticks` and scan labels printed raw control bytes from broken
+  USB serial descriptors (NULs garbled terminal output); they are now
+  stripped (`ant.SanitizeSerial`).
 
 ## [0.1.2] - 2026-09
 

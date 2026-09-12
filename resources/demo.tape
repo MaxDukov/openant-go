@@ -1,30 +1,41 @@
 # Demo recording script for vhs (https://github.com/charmbracelet/vhs).
-# Requires: vhs installed, libusb, and a real ANT USB stick attached.
+# Requires: vhs installed, libusb, and a real ANT USB stick attached
+# (plus an ANT+ heart rate sensor in range for the scan part).
 #
 #   vhs resources/demo.tape
 #
-# Output: resources/demo.gif — referenced from the README once recorded.
+# Output: resources/demo.gif — embedded in the README.
+# The "pi" host alias points to the Raspberry Pi with the sticks.
 
-Output resources/demo.gif
+Output "resources/demo.gif"
 Set Shell zsh
-Set FontSize 20
+Set FontSize 18
 Set Width 960
 Set Height 540
-Set Padding 24
+Set Padding 20
 Set Theme "Catppuccin Mocha"
 Set CursorBlink false
+Set TypingSpeed 40ms
+
+Type "ssh pi"
+Enter
+Sleep 2s
 
 Type "goant version"
 Enter
-Sleep 900ms
+Sleep 800ms
 
 Type "goant sticks"
 Enter
-Sleep 1500ms
+Sleep 2s
 
-Type@200ms "goant scan -t HeartRate"
+Type "goant scan -serials 1:7 -t HeartRate -auto_create"
 Enter
-Sleep 6s
+Sleep 12s
 
 Ctrl+C
-Sleep 700ms
+Sleep 600ms
+
+Type "exit"
+Enter
+Sleep 1s

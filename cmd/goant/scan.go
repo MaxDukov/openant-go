@@ -78,7 +78,7 @@ func resolveSticks(a scanArgs) ([]stickLauncher, error) {
 			continue
 		}
 		seen[info] = true
-		label := info.Serial
+		label := ant.SanitizeSerial(info.Serial)
 		if label == "" {
 			label = fmt.Sprintf("%d:%d", info.Bus, info.Address)
 		}

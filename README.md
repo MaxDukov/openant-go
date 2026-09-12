@@ -10,6 +10,8 @@ English | [Русский](README.ru.md)
 ANT and ANT-FS library for Go — a port of the Python
 [openant](https://github.com/Tigge/openant) library.
 
+![goant scan finding a heart rate monitor](resources/demo.gif)
+
 > A note on ANT/ANT-FS/ANT+: this library is for development and testing of
 > devices and is not intended to be used as a reference. Refer to
 > [thisisant.com](https://www.thisisant.com/) for full ANT documentation and
