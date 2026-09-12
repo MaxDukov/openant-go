@@ -1,5 +1,12 @@
 # openant-go
 
+[![CI](https://github.com/MaxDukov/openant-go/actions/workflows/ci.yml/badge.svg)](https://github.com/MaxDukov/openant-go/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/maxdukov/openant-go.svg)](https://pkg.go.dev/github.com/maxdukov/openant-go)
+[![Go Report Card](https://goreportcard.com/badge/github.com/maxdukov/openant-go)](https://goreportcard.com/report/github.com/maxdukov/openant-go)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+English | [Русский](README.ru.md)
+
 ANT and ANT-FS library for Go — a port of the Python
 [openant](https://github.com/Tigge/openant) library.
 
