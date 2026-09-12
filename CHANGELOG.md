@@ -9,10 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Planned work is tracked in [TODO.md](TODO.md).
 
+## [0.2.0] - 2026-09-12
+
 ### Added
 
-- Phased roadmap: robustness/technical debt, protocol/profiles, ecosystem.
-- README demo GIF of a live `goant scan` finding a heart rate monitor.
+- Advanced burst transfers (configuration, segmented TX, RX
+  reassembly), channel search sharing and LIB config (RSSI /
+  timestamp / channel-ID extended data), with automatic
+  protocol-revision detection for Rev 5.1 vs modern firmware message
+  ids.
+- Blood Pressure profile (broadcast measurement page decoding).
+- `goant udev` — installs the bundled udev rules for the ANT USB
+  sticks on Linux (embedded into the binary; `-dest`/`-dry_run`).
+- `goant influx` — stream device data to InfluxDB (v1 `/write` and v2
+  `/api/v2/write`, line protocol, batching, saved device lists).
+- `goant mqtt` — publish device events as JSON to an MQTT broker
+  (paho, `-topic-per-field`, auto-reconnect).
+- Benchmarks for parser hot paths (`make bench`) and continuous
+  fuzzing: PR smoke (15 s/target) plus a nightly workflow (3 min/target)
+  with cached corpora and failing-input artifacts.
+- golangci-lint in CI (pinned action, repo .golangci.yml).
+- README demo GIF of a live `goant scan` finding a heart rate monitor;
+  bilingual README (English/Russian); CHANGELOG; CONTRIBUTING guide;
+  Code of Conduct; issue/PR templates; phased roadmap in TODO.md.
 
 ### Fixed
 
@@ -20,15 +39,12 @@ Planned work is tracked in [TODO.md](TODO.md).
   USB serial descriptors (NULs garbled terminal output); they are now
   stripped (`ant.SanitizeSerial`).
 
+### Changed
+
+- Timezone handling documented: all timestamps are UTC; local rendering
+  via `CommonData.Local()` and `goant scan -localtime` (openant #119).
+
 ## [0.1.2] - 2026-09
-
-### Added
-
-- `goant influx` and `goant mqtt` streaming subcommands (InfluxDB v1/v2
-  line protocol, MQTT JSON events, topic-per-field mode).
-- `goant udev` installer for the bundled ANT USB stick udev rules
-  (embedded into the binary).
-- Bike Speed and Cadence connection troubleshooting documentation.
 
 ### Changed
 
@@ -73,7 +89,8 @@ Planned work is tracked in [TODO.md](TODO.md).
   upload, erase), ANT+ device profiles, `anttest` simulator, `goant`
   CLI (`scan`, `sticks`), 14 example applications.
 
-[Unreleased]: https://github.com/MaxDukov/openant-go/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/MaxDukov/openant-go/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/MaxDukov/openant-go/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/MaxDukov/openant-go/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/MaxDukov/openant-go/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/MaxDukov/openant-go/releases/tag/v0.1.0
