@@ -336,8 +336,11 @@ Next development phases in priority order. Check items off as they land
 - ⬜ Shared common-page (80–83) decoder used by both `baseDevice.onData`
       and `Scanner.scanData` — the copies already drifted (sw-ver
       format); one decoder, table-driven tests.
-- ⬜ Unify the three near-identical ack/burst retry loops in
-      `easy/channel.go` behind one helper.
+- ✅ Unify the three near-identical ack/burst retry loops in
+      `easy/channel.go` behind one helper. DONE: `sendWithRetry(what,
+      waitStart, send)` — behavior contract pinned by characterization
+      tests (retry only on ErrTransferFailed, per-attempt event order,
+      byte-identical log wording).
 - ⬜ Scanner bookkeeping: structural key (id, type, transType) instead
       of the `fmt.Sprintf` string — devices sharing id:type but
       differing in transType overwrite each other's common data.
