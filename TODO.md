@@ -327,9 +327,12 @@ Next development phases in priority order. Check items off as they land
 
 ### Phase 1 — Robustness and technical debt
 
-- ⬜ Refactor `ant/node.go` (~1000 lines): split reader / dispatcher /
+- ✅ Refactor `ant/node.go` (~1000 lines): split reader / dispatcher /
       reconnect supervisor / config commands into focused files without
-      public API changes; existing tests stay green.
+      public API changes; existing tests stay green. DONE: byte-identical
+      code motion into reconnect.go / reader.go / dispatch.go / tx.go /
+      config.go (node.go now 227 lines); `go test -race`, fuzz, benchmarks
+      (within noise) and a real-hardware smoke all green.
 - ⬜ Shared common-page (80–83) decoder used by both `baseDevice.onData`
       and `Scanner.scanData` — the copies already drifted (sw-ver
       format); one decoder, table-driven tests.
