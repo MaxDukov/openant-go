@@ -1,6 +1,9 @@
 package ant
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"fmt"
+)
 
 // StandardOptions, AdvancedOptions, AdvancedOptionsTwo and AdvancedOptionsThree
 // are the capability bitsets returned in the CAPABILITIES response (0x54).
@@ -79,6 +82,10 @@ type Capabilities struct {
 	AdvancedOptionsTwo    AdvancedOptionsTwo
 	MaxSensorcoreChannels int
 	AdvancedOptionsThree  AdvancedOptionsThree
+}
+
+func errShortPayload(what string, want, got int) error {
+	return fmt.Errorf("ant: %s payload too short: want %d bytes, got %d", what, want, got)
 }
 
 // ParseCapabilities decodes the payload of a CAPABILITIES response. At least
