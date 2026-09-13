@@ -448,29 +448,42 @@ func (c *Channel) DisableAdvancedBurst() error {
 	return nil
 }
 
-// SendAdvancedBurst sends data as an advanced burst (multiple packets of
-// the configured size), retrying the whole burst on transfer failure.
-func (c *Channel) SendAdvancedBurst(data []byte) error {
+// sendWithRetry runs send, then waits for the transfer lifecycle events,
+// retrying the whole transfer on ErrTransferFailed (openant semantics).
+// waitStart enables the EventTransferTxStart stage (burst transfers only;
+// acknowledged data completes without a start event). what names the
+// transfer in log lines.
+func (c *Channel) sendWithRetry(what string, waitStart bool, send func() error) error {
 	for {
-		if err := c.node.Core.SendAdvancedBurst(c.ID, data); err != nil {
+		if err := send(); err != nil {
 			return err
 		}
-		if _, err := c.node.WaitForEvent(ant.EventTransferTxStart); err != nil {
-			if err == ErrTransferFailed {
-				c.logger().Warn("advanced burst transfer start failed, retrying", "channel", c.ID)
-				continue
+		if waitStart {
+			if _, err := c.node.WaitForEvent(ant.EventTransferTxStart); err != nil {
+				if err == ErrTransferFailed {
+					c.logger().Warn(what+" transfer start failed, retrying", "channel", c.ID)
+					continue
+				}
+				return err
 			}
-			return err
 		}
 		if _, err := c.node.WaitForEvent(ant.EventTransferTxCompleted); err != nil {
 			if err == ErrTransferFailed {
-				c.logger().Warn("advanced burst transfer failed, retrying", "channel", c.ID)
+				c.logger().Warn(what+" transfer failed, retrying", "channel", c.ID)
 				continue
 			}
 			return err
 		}
 		return nil
 	}
+}
+
+// SendAdvancedBurst sends data as an advanced burst (multiple packets of
+// the configured size), retrying the whole burst on transfer failure.
+func (c *Channel) SendAdvancedBurst(data []byte) error {
+	return c.sendWithRetry("advanced burst", true, func() error {
+		return c.node.Core.SendAdvancedBurst(c.ID, data)
+	})
 }
 
 // SendBroadcastData sends 8 bytes of broadcast data immediately.
@@ -481,44 +494,17 @@ func (c *Channel) SendBroadcastData(data []byte) error {
 // SendAcknowledgedData sends 8 bytes of acknowledged data, retrying on
 // transfer failure as openant does.
 func (c *Channel) SendAcknowledgedData(data []byte) error {
-	for {
-		if err := c.node.Core.SendAcknowledgedData(c.ID, data); err != nil {
-			return err
-		}
-		if _, err := c.node.WaitForEvent(ant.EventTransferTxCompleted); err != nil {
-			if err == ErrTransferFailed {
-				c.logger().Warn("acknowledged data transfer failed, retrying", "channel", c.ID)
-				continue
-			}
-			return err
-		}
-		return nil
-	}
+	return c.sendWithRetry("acknowledged data", false, func() error {
+		return c.node.Core.SendAcknowledgedData(c.ID, data)
+	})
 }
 
 // SendBurstTransfer sends a burst (multiple of 8 bytes), retrying the whole
 // burst on transfer failure as openant does.
 func (c *Channel) SendBurstTransfer(data []byte) error {
-	for {
-		if err := c.node.Core.SendBurstTransfer(c.ID, data); err != nil {
-			return err
-		}
-		if _, err := c.node.WaitForEvent(ant.EventTransferTxStart); err != nil {
-			if err == ErrTransferFailed {
-				c.logger().Warn("burst transfer start failed, retrying", "channel", c.ID)
-				continue
-			}
-			return err
-		}
-		if _, err := c.node.WaitForEvent(ant.EventTransferTxCompleted); err != nil {
-			if err == ErrTransferFailed {
-				c.logger().Warn("burst transfer failed, retrying", "channel", c.ID)
-				continue
-			}
-			return err
-		}
-		return nil
-	}
+	return c.sendWithRetry("burst", true, func() error {
+		return c.node.Core.SendBurstTransfer(c.ID, data)
+	})
 }
 
 // restore replays the recorded configuration onto the (freshly reset)
