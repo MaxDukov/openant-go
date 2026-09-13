@@ -104,8 +104,10 @@ func awaitSend(t *testing.T, send func() error) error {
 // the channel id, as the retry warnings do.
 func requireChannelAttr(t *testing.T, r slog.Record, id byte) {
 	t.Helper()
+	found := false
 	r.Attrs(func(a slog.Attr) bool {
 		if a.Key == "channel" {
+			found = true
 			// slog stores a byte argument as KindUint64.
 			if a.Value.Kind() != slog.KindUint64 || a.Value.Uint64() != uint64(id) {
 				t.Fatalf("channel attr = %v (%s), want %d", a.Value, a.Value.Kind(), id)
@@ -114,6 +116,9 @@ func requireChannelAttr(t *testing.T, r slog.Record, id byte) {
 		}
 		return true
 	})
+	if !found {
+		t.Error("record has no \"channel\" attr")
+	}
 }
 
 func TestSendAcknowledgedDataRetriesOnTransferFailed(t *testing.T) {
